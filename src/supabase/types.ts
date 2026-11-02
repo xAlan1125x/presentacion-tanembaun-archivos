@@ -1,0 +1,42 @@
+import type { GameId } from '../game'
+
+export type SessionStatus = 'active' | 'closed'
+
+export interface OnlineSession {
+  id: string
+  ownerId: string
+  name: string
+  joinCode: string
+  status: SessionStatus
+  createdAt: string
+  closedAt?: string
+}
+
+export interface RankingEntry {
+  position: number
+  nickname: string
+  totalScore: number
+}
+
+export interface SessionParticipantSummary {
+  participantId: string
+  nickname: string
+  finishedAt?: string
+  totalScore: number
+}
+
+export interface ParticipantProgressRow {
+  participantId: string
+  gameId: GameId
+  status: 'not-started' | 'in-progress' | 'completed'
+  bestScore: number
+  attempts: number
+  lastExplanation?: string
+  completedAt?: string
+  updatedAt: string
+}
+
+export interface OnlineJoinResult {
+  session: OnlineSession
+  participantId: string
+}
