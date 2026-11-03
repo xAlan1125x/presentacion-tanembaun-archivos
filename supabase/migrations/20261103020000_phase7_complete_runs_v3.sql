@@ -12,7 +12,9 @@ create table if not exists public.participant_run_state_v3 (
   best_academic_score bigint not null default 0 check (best_academic_score between 0 and 400),
   best_factory_score bigint not null default 0 check (best_factory_score >= 0),
   best_total_score bigint not null default 0 check (best_total_score >= 0),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  check (jsonb_typeof(current_state) = 'object'),
+  check (best_total_score = best_academic_score + best_factory_score)
 );
 
 alter table public.participant_run_state_v3 enable row level security;
@@ -28,6 +30,11 @@ create policy run_state_v3_select on public.participant_run_state_v3 for select 
 
 revoke all on public.participant_run_state_v3 from anon, authenticated;
 grant select on public.participant_run_state_v3 to authenticated;
+
+-- La versión de reglas identifica el formato histórico de una partida y no debe
+-- poder cambiarse mediante el update genérico que usa el panel para cerrarla.
+revoke update on public.sessions from authenticated;
+grant update (name, status, closed_at) on public.sessions to authenticated;
 
 create or replace function public.create_game_session(session_name text)
 returns public.sessions
@@ -114,7 +121,7 @@ begin
       'updatedAt', created_at,
       'games', empty_games
     ))
-    on conflict (participant_id) do nothing;
+    on conflict on constraint participant_run_state_v3_pkey do nothing;
     select r.current_state into p_run_state
     from public.participant_run_state_v3 r
     where r.participant_id = p_id;
@@ -253,7 +260,8 @@ begin
   join public.sessions s on s.id = p.session_id
   where p.id = target_participant_id
     and p.auth_user_id = auth.uid()
-    and p.finished_at is null;
+    and p.finished_at is null
+  for update of p, s;
 
   if participant_nickname is null or session_status <> 'active' or session_rules <> 3 then
     raise exception 'participant access denied, participation finalized, session closed, or incompatible rules';
@@ -413,7 +421,8 @@ begin
   where p.id = target_participant_id
     and p.auth_user_id = auth.uid()
     and p.finished_at is null
-    and s.status = 'active';
+    and s.status = 'active'
+  for update of p, s;
 
   if rules is null then
     raise exception 'participant access denied, participation finalized, or session closed';
