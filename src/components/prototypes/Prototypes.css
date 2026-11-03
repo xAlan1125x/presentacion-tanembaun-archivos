@@ -113,5 +113,48 @@ body:has(.prototype-shell) { background:radial-gradient(circle at 12% 15%,#2c789
 @keyframes factory-ticket-pulse { to { transform:translateX(3px); } }
 @media (prefers-reduced-motion:reduce) { .prototype-feedback,.factory-order.is-processing,.rush-file { animation:none; } }
 @media (max-width:900px) { .factory-stations { grid-template-columns:repeat(2,minmax(0,1fr)); } }
-@media (max-width:800px) { .rush-conveyor { justify-content:center; overflow:hidden; }.rush-file { width:210px; }.factory-layout { grid-template-columns:1fr; }.factory-orders { width:100%; max-height:340px; }.factory-floor-heading { align-items:flex-start; flex-direction:column; }.factory-preflight { align-items:flex-start; flex-direction:column; } }
+@media (max-width:800px) {
+  .rush-conveyor { justify-content:center; overflow:hidden; }
+  .rush-file { width:210px; }
+  .factory-layout { grid-template-columns:1fr; }
+  .factory-orders { width:100%; max-height:340px; }
+  .factory-floor-heading { align-items:flex-start; flex-direction:column; }
+  .factory-preflight { align-items:flex-start; flex-direction:column; }
+
+  .factory-game .factory-layout {
+    width:100%;
+    min-width:0;
+    grid-template-columns:minmax(0,1fr);
+  }
+  .factory-game .factory-orders {
+    box-sizing:border-box;
+    display:flex;
+    flex-flow:row nowrap;
+    align-items:stretch;
+    width:100%;
+    max-width:100%;
+    max-height:none;
+    padding:58px 13px 13px;
+    overflow-x:auto;
+    overflow-y:hidden;
+    scroll-snap-type:x proximity;
+    overscroll-behavior-x:contain;
+  }
+  .factory-game .factory-orders h3 {
+    position:absolute;
+    inset:13px 13px auto;
+    margin:0;
+  }
+  .factory-game .factory-order {
+    flex:0 0 min(230px,76vw);
+    width:auto;
+    max-width:none;
+    scroll-snap-align:start;
+  }
+  .factory-game .factory-floor {
+    box-sizing:border-box;
+    width:100%;
+    min-width:0;
+  }
+}
 @media (max-width:520px) { .rush-gamebar { grid-template-columns:1fr auto; }.rush-gamebar > div { grid-column:1/-1; grid-row:2; }.rush-stations { gap:9px; }.rush-station { min-height:112px; padding:8px; }.rush-station strong { font-size:.82rem; }.rush-station small { font-size:.7rem; }.factory-scoreboard { display:grid; grid-template-columns:1fr 1fr; }.factory-scoreboard strong { grid-column:1/-1; }.factory-stations { grid-template-columns:repeat(2,minmax(0,1fr)); grid-template-areas:none; }.factory-station { min-height:155px; padding:8px; }.factory-flow-line { display:none; }.factory-preflight > div:last-child,.factory-preflight button { width:100%; } }
