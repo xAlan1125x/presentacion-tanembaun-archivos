@@ -12,10 +12,14 @@ vi.mock('../client', () => ({ supabase: {} }))
 
 import { finalizeParticipant, getCurrentUser, loadParticipantRunState, saveParticipantRunState } from '../service'
 import {
+  clearOnlineParticipant,
   createActiveGameStore,
   finalizeOnlineParticipation,
+  getOnlineParticipant,
+  loadOnlineState,
   restoreOnlineState,
   retryOnlineSync,
+  saveActiveGameState,
   saveOnlineParticipant,
   type OnlineParticipant,
 } from '../participant'
@@ -146,5 +150,47 @@ describe('recorridos v3 online', () => {
     vi.clearAllMocks()
     await expect(retryOnlineSync()).resolves.toEqual({ error: null })
     expect(saveParticipantRunState).not.toHaveBeenCalled()
+  })
+
+  it('sale y reingresa a la misma partida sin borrar su progreso local', () => {
+    const identity = participant()
+    const progress = completeFirstStage()
+    prepareWindow(identity)
+    createActiveGameStore().save(progress)
+
+    expect(clearOnlineParticipant()).toEqual({ ok: true, value: undefined })
+    expect(getOnlineParticipant()).toBeNull()
+    expect(loadOnlineState(identity)).toEqual(progress)
+
+    expect(saveOnlineParticipant(identity).ok).toBe(true)
+    expect(createActiveGameStore().load()).toEqual({ ok: true, value: progress })
+  })
+
+  it('mantiene aislados el modo local y participantes de partidas diferentes', () => {
+    const first = participant({ participantId: 'participant-a', sessionId: 'session-a', joinCode: 'AAAAAAAA' })
+    const second = participant({ participantId: 'participant-b', sessionId: 'session-b', joinCode: 'BBBBBBBB', nickname: 'Lin' })
+    vi.stubGlobal('window', { localStorage: createStorage() })
+    const local = createInitialState('Local', '2026-11-03T00:00:00.000Z', 'local-run')
+    createActiveGameStore().save(local)
+    saveOnlineParticipant(first)
+    createActiveGameStore().save(completeFirstStage())
+
+    clearOnlineParticipant()
+    expect(createActiveGameStore().load()).toEqual({ ok: true, value: local })
+    saveOnlineParticipant(second)
+    expect(createActiveGameStore().load()).toEqual({ ok: true, value: null })
+    clearOnlineParticipant()
+    saveOnlineParticipant(first)
+    const restored = createActiveGameStore().load()
+    expect(restored.ok && restored.value?.games['classify-files'].status).toBe('completed')
+  })
+
+  it('no permite modificar una participación finalizada después de reingresar', () => {
+    const identity = participant({ finishedAt: '2026-11-03T03:00:00.000Z' })
+    prepareWindow(identity)
+    clearOnlineParticipant()
+    saveOnlineParticipant(identity)
+
+    expect(saveActiveGameState(completeRun())).toEqual({ ok: false, error: 'Tu participación ya fue finalizada y no admite nuevos resultados.' })
   })
 })

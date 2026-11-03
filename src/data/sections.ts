@@ -23,4 +23,5 @@ export const presentationSections: PresentationSection[] = [
   { id: 'copyfile-challenge', eyebrow: 'Fase 5.5', shortTitle: 'Copyfile Challenge', title: 'Copia bloque por bloque' },
   { id: 'filelab-factory', eyebrow: 'Etapa 5', shortTitle: 'FileLab Factory', title: 'Gestión de pedidos y operaciones' },
   { id: 'sintesis', eyebrow: 'Cierre', shortTitle: 'Síntesis', title: 'Siete ideas, un mismo archivo' },
+  { id: 'clasificacion', eyebrow: 'Resultados', shortTitle: 'Clasificación', title: 'Clasificación de la partida' },
 ]

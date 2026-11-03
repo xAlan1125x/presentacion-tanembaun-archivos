@@ -21,6 +21,10 @@ export interface RankingEntry {
   totalScore: number
 }
 
+export interface PublicRankingEntry extends RankingEntry {
+  finalized: boolean
+}
+
 export interface SessionParticipantSummary {
   participantId: string
   nickname: string

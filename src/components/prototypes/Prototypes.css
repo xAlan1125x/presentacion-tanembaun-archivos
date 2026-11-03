@@ -79,6 +79,7 @@ body:has(.prototype-shell) { background:radial-gradient(circle at 12% 15%,#2c789
 .factory-scoreboard strong { color:#17563a; background:#d9f5e5; }
 .factory-preflight { display:flex; justify-content:space-between; gap:18px; align-items:center; margin:14px 0; padding:16px 18px; border:3px solid #f2bd54; border-radius:18px; color:#273e4e; background:linear-gradient(120deg,#fff5d8,#edf8f5); box-shadow:0 7px 0 rgba(112,81,24,.12); }
 .factory-preflight > div { display:grid; gap:4px; }.factory-preflight > div:last-child { display:flex; flex-wrap:wrap; gap:10px; }.factory-preflight span { color:#976018; font-size:.75rem; font-weight:900; letter-spacing:.08em; text-transform:uppercase; }.factory-preflight strong { font-size:1.15rem; }.factory-preflight small { color:#496272; }
+.factory-preflight ol { display:grid; gap:3px; margin:6px 0; padding-left:22px; color:#324f60; font-size:.9rem; }
 .prototype-secondary { min-height:52px; padding:12px 22px; border:2px solid #237781; border-radius:12px; color:#185965; background:#e7f7f5; font:inherit; font-weight:850; cursor:pointer; }.prototype-secondary:hover { background:#d3f0ed; }
 .factory-layout { grid-template-columns:max-content minmax(0,1fr); align-items:start; }
 .factory-orders { position:relative; width:fit-content; max-width:100%; max-height:560px; overflow:auto; padding:13px; border:3px dashed #72a5af; border-radius:20px; background:#dcecee; }
@@ -121,12 +122,12 @@ body:has(.prototype-shell) { background:radial-gradient(circle at 12% 15%,#2c789
   .factory-floor-heading { align-items:flex-start; flex-direction:column; }
   .factory-preflight { align-items:flex-start; flex-direction:column; }
 
-  .factory-game .factory-layout {
+  .factory-layout {
     width:100%;
     min-width:0;
     grid-template-columns:minmax(0,1fr);
   }
-  .factory-game .factory-orders {
+  .factory-orders {
     box-sizing:border-box;
     display:flex;
     flex-flow:row nowrap;
@@ -140,18 +141,19 @@ body:has(.prototype-shell) { background:radial-gradient(circle at 12% 15%,#2c789
     scroll-snap-type:x proximity;
     overscroll-behavior-x:contain;
   }
-  .factory-game .factory-orders h3 {
+  .factory-orders h2,
+  .factory-orders h3 {
     position:absolute;
     inset:13px 13px auto;
     margin:0;
   }
-  .factory-game .factory-order {
+  .factory-order {
     flex:0 0 min(230px,76vw);
     width:auto;
     max-width:none;
     scroll-snap-align:start;
   }
-  .factory-game .factory-floor {
+  .factory-floor {
     box-sizing:border-box;
     width:100%;
     min-width:0;

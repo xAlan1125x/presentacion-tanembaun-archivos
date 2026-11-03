@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { GAME_IDS, PHASE5_STORAGE_KEY, createInitialState, createLocalGameStore, recordEvaluation } from '..'
+import { GAME_IDS, PHASE5_STORAGE_KEY, createFreshLocalGame, createInitialState, createLocalGameStore, factoryActiveStorageKey, recordEvaluation } from '..'
 
 function storage(): Storage {
   const values = new Map<string, string>()
@@ -56,5 +56,24 @@ describe('persistencia local de fase 5', () => {
     store.save(createInitialState('jugador'))
     expect(store.clear()).toEqual({ ok: true, value: undefined })
     expect(store.load()).toEqual({ ok: true, value: null })
+  })
+
+  it('crea una partida individual nueva sin puntuaciones ni cronómetro del recorrido anterior', () => {
+    const fakeStorage = storage()
+    const previous = GAME_IDS.reduce(
+      (current, gameId) => recordEvaluation(current, gameId, { score: 80, completed: true, explanation: 'Lista.' }),
+      createInitialState('Ada', '2026-11-03T00:00:00.000Z', 'old-run'),
+    )
+    createLocalGameStore(fakeStorage).save(previous)
+    const timerKey = factoryActiveStorageKey('Ada:old-run')
+    fakeStorage.setItem(timerKey, '{"active":true}')
+
+    const result = createFreshLocalGame(fakeStorage, 'Lin', '2026-11-03T01:00:00.000Z', 'new-run')
+
+    expect(result.ok && result.value).toMatchObject({ playerId: 'Lin', currentRunId: 'new-run', currentRunNumber: 1 })
+    expect(result.ok && 'bestRun' in result.value).toBe(false)
+    expect(result.ok && 'finalizedAt' in result.value).toBe(false)
+    expect(result.ok && result.value && GAME_IDS.every((gameId) => result.value.games[gameId].status === 'not-started')).toBe(true)
+    expect(fakeStorage.getItem(timerKey)).toBeNull()
   })
 })

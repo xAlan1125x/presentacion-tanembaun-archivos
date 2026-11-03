@@ -1,7 +1,7 @@
 import type { AuthError, User } from '@supabase/supabase-js'
 import { GAME_IDS, parsePhase5State, type GameId, type Phase5State } from '../game'
 import { supabase } from './client'
-import type { OnlineSession, ParticipantProgressRow, RankingEntry, SessionParticipantSummary } from './types'
+import type { OnlineSession, ParticipantProgressRow, PublicRankingEntry, RankingEntry, SessionParticipantSummary } from './types'
 import type { GameProgress } from '../game'
 
 interface SessionRow {
@@ -115,6 +115,23 @@ export async function loadSessionRanking(sessionId: string): Promise<{ ranking: 
       academicScore: Number(row.academic_score),
       factoryScore: Number(row.factory_score),
       totalScore: Number(row.total_score),
+    })),
+    error: null,
+  }
+}
+
+export async function loadPublicSessionRanking(joinCode: string): Promise<{ ranking: PublicRankingEntry[]; error: Error | null }> {
+  if (!supabase) return { ranking: [], error: getSupabaseUnavailableError() }
+  const { data, error } = await supabase.rpc('get_public_session_ranking', { requested_code: joinCode.trim().toUpperCase() })
+  if (error) return { ranking: [], error }
+  return {
+    ranking: (Array.isArray(data) ? data : []).map((row) => ({
+      position: Number(row.position),
+      nickname: String(row.nickname),
+      academicScore: Number(row.academic_score),
+      factoryScore: Number(row.factory_score),
+      totalScore: Number(row.total_score),
+      finalized: Boolean(row.finalized),
     })),
     error: null,
   }

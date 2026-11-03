@@ -53,12 +53,10 @@ export function saveOnlineParticipant(participant: OnlineParticipant): Persisten
 export function clearOnlineParticipant(): PersistenceResult<void> {
   if (typeof window === 'undefined') return { ok: false, error: 'El almacenamiento online no está disponible.' }
   try {
-    const participant = readParticipant(window.localStorage)
     window.localStorage.removeItem(PARTICIPANT_KEY)
-    if (participant) window.localStorage.removeItem(`${ONLINE_STATE_PREFIX}${participant.participantId}`)
     return { ok: true, value: undefined }
   } catch {
-    return { ok: false, error: 'No se pudo borrar la partida online.' }
+    return { ok: false, error: 'No se pudo salir de la partida online.' }
   }
 }
 

@@ -9,6 +9,8 @@ import {
   type Phase5State,
   type PersistenceResult,
 } from './types'
+import { createInitialState } from './rules'
+import { factoryActiveStorageKey } from './factory'
 
 export const PHASE5_STORAGE_KEY = 'filelab:phase5:progress:v3'
 export const PHASE5_PROGRESS_EVENT = 'filelab:phase5-progress-updated'
@@ -112,4 +114,26 @@ export function createLocalGameStore(storage: Storage, key = PHASE5_STORAGE_KEY)
       }
     },
   }
+}
+
+/** Crea una partida local independiente y descarta el cronómetro activo del recorrido reemplazado. */
+export function createFreshLocalGame(
+  storage: Storage,
+  playerId: string,
+  now?: string,
+  runId?: string,
+): PersistenceResult<Phase5State> {
+  const store = createLocalGameStore(storage)
+  const previous = store.load()
+  const next = createInitialState(playerId, now, runId)
+  const saved = store.save(next)
+  if (!saved.ok) return saved
+  if (previous.ok && previous.value) {
+    try {
+      storage.removeItem(factoryActiveStorageKey(`${previous.value.playerId}:${previous.value.currentRunId}`))
+    } catch {
+      // El nuevo identificador de recorrido evita reutilizar el cronómetro aunque falle esta limpieza opcional.
+    }
+  }
+  return { ok: true, value: next }
 }

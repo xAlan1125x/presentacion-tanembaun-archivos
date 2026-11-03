@@ -1,5 +1,5 @@
 export { calculateScore, createInitialState, evaluateResolution, finalizeLocalParticipation, fixedGamesScore, isCurrentRunComplete, isGameUnlocked, progressPercentage, recordEvaluation, resetGameProgress, resetState, startNewRun, totalScore } from './rules'
-export { createLocalGameStore, notifyPhase5ProgressUpdated, parsePhase5State, PHASE5_PROGRESS_EVENT, PHASE5_STORAGE_KEY } from './persistence'
+export { createFreshLocalGame, createLocalGameStore, notifyPhase5ProgressUpdated, parsePhase5State, PHASE5_PROGRESS_EVENT, PHASE5_STORAGE_KEY } from './persistence'
 export { validateNickname } from './identity'
 export { FIXED_GAMES_MAX_SCORE, FIXED_SCORE_GAME_IDS, GAME_IDS, GAME_MAX_SCORE, PHASE5_STATE_VERSION } from './types'
 export { CLASSIFIABLE_FILES, evaluateClassifications, saveClassificationEvaluation } from './classifyFiles'

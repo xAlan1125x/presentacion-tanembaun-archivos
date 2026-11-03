@@ -8,8 +8,10 @@ import { CopyfileChallengeGame } from './components/games/CopyfileChallengeGame'
 import { FileLabFactoryGame } from './components/games/FileLabFactoryGame'
 import { OperationRescueHub } from './components/games/OperationRescueHub'
 import { createLocalGameStore, isGameUnlocked, type Phase5State } from './game'
+import { createActiveGameStore, getOnlineParticipant } from './supabase'
 import { PresentationControls } from './components/PresentationControls'
 import { SectionNav } from './components/SectionNav'
+import { PublicRanking } from './components/online/PublicRanking'
 import { presentationSections } from './data/sections'
 import { useActiveSection } from './hooks/useActiveSection'
 
@@ -17,7 +19,10 @@ const sectionIds = presentationSections.map((section) => section.id)
 const SectionHeader = ({ id, eyebrow, title, description }: { id: string; eyebrow: string; title: string; description: string }) => <header className="section-heading"><span className="eyebrow">{eyebrow}</span><h2 id={id}>{title}</h2><p>{description}</p></header>
 const loadRescueState = (): Phase5State | null => {
   if (typeof window === 'undefined') return null
-  const loaded = createLocalGameStore(window.localStorage).load()
+  const participant = getOnlineParticipant()
+  const invitationCode = new URLSearchParams(window.location.search).get('partida')?.toUpperCase()
+  if (participant && invitationCode && participant.joinCode !== invitationCode) return null
+  const loaded = participant ? createActiveGameStore().load() : createLocalGameStore(window.localStorage).load()
   return loaded.ok && loaded.value && loaded.value.playerId !== 'local-player' ? loaded.value : null
 }
 
@@ -65,6 +70,8 @@ function Phase4App() {
       <section id="filelab-factory" className="presentation-section escape-room-section" aria-labelledby="filelab-factory-title"><SectionHeader id="filelab-factory-title" eyebrow="Operación Rescate · Etapa 5" title="FileLab Factory" description="Gestioná pedidos y llevá cada archivo por una secuencia lógica de llamadas al sistema durante 105 segundos."/>{rescueState && isGameUnlocked(rescueState, 'escape-room') ? <FileLabFactoryGame key={rescueState.currentRunId}/> : lockedRescueStage}</section>
 
       <section id="sintesis" className="presentation-section summary-section section-dark" aria-labelledby="sintesis-title"><div className="summary-heading"><span className="eyebrow">Conclusión</span><h2 id="sintesis-title">Siete decisiones.<br/><em>Un mismo archivo.</em></h2><p>La abstracción es simple para el usuario, pero combina identificación, interpretación, estado y operaciones.</p></div><div className="takeaway-grid" aria-label="Síntesis de conceptos">{[['Nombre','permite encontrarlo'],['Estructura','define sus unidades'],['Tipo','orienta la interpretación'],['Acceso','decide desde dónde leer'],['Atributos','describen y controlan'],['Operaciones','cambian estado y datos'],['Copyfile','integra todo el ciclo']].map(([name,idea],index)=><article key={name}><span>{String(index+1).padStart(2,'0')}</span><strong>{name}</strong><p>{idea}</p></article>)}</div><div className="final-check"><span>Comprobación final</span><p>Si una lectura devuelve menos bytes que los solicitados, ¿es siempre un error?</p><strong>No. Puede ser una transferencia parcial o el final próximo del archivo; hay que observar el resultado y la cantidad transferida.</strong></div><div className="summary-footer"><span>Alcance completado</span><p>4.1.1–4.1.7 · explicación, predicción, demostración y resolución.</p></div></section>
+
+      <section id="clasificacion" className="presentation-section public-ranking-section" aria-labelledby="clasificacion-title"><SectionHeader id="clasificacion-title" eyebrow="Operación Rescate · Resultados" title="Clasificación de la partida" description="Consultá el mejor recorrido completo de una partida mediante su código, sin unirte como participante."/><PublicRanking/></section>
     </main>
     <PresentationControls current={activeIndex} total={presentationSections.length} presentationMode={presentationMode} onPrevious={()=>navigateTo(sectionIds[Math.max(activeIndex-1,0)])} onNext={()=>navigateTo(sectionIds[Math.min(activeIndex+1,sectionIds.length-1)])} onTogglePresentation={togglePresentationMode}/>
   </div>

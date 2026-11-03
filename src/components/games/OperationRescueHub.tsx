@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
-  createInitialState,
+  createFreshLocalGame,
   createLocalGameStore,
   fixedGamesScore,
   GAME_IDS,
@@ -14,6 +14,7 @@ import {
   type Phase5State,
 } from '../../game'
 import { TeacherSessionPanel } from '../online/TeacherSessionPanel'
+import { RankingTable } from '../online/RankingTable'
 import {
   createActiveGameStore,
   getOnlineParticipant,
@@ -57,8 +58,9 @@ export function OperationRescueHub({ state, onStateChange, onNavigate }: Operati
   const [onlineMessage, setOnlineMessage] = useState('')
   const [onlineBusy, setOnlineBusy] = useState(false)
   const [ranking, setRanking] = useState<RankingEntry[]>([])
-  const [hasInvitation] = useState(() => typeof window !== 'undefined' && Boolean(new URLSearchParams(window.location.search).get('partida')))
-  const [entryMode, setEntryMode] = useState<'local' | 'online' | null>(() => hasInvitation ? 'online' : null)
+  const [invitationActive, setInvitationActive] = useState(() => typeof window !== 'undefined' && Boolean(new URLSearchParams(window.location.search).get('partida')))
+  const [entryMode, setEntryMode] = useState<'local' | 'online' | null>(() => invitationActive ? 'online' : null)
+  const savedLocalState = state ? null : loadSavedState()
 
   useEffect(() => {
     const refresh = (event: Event) => {
@@ -123,15 +125,42 @@ export function OperationRescueHub({ state, onStateChange, onNavigate }: Operati
       setError(validation.error ?? 'El apodo no es válido.')
       return
     }
-    const next = createInitialState(validation.value)
-    const saved = typeof window === 'undefined' ? null : createLocalGameStore(window.localStorage).save(next)
-    if (saved && !saved.ok) {
-      setError(saved.error)
+    if (savedLocalState && !window.confirm('Esto eliminará el progreso de la partida individual anterior. ¿Crear una partida nueva?')) return
+    const created = createFreshLocalGame(window.localStorage, validation.value)
+    if (!created.ok) {
+      setError(created.error)
       return
     }
     setError('')
-    onStateChange(next)
+    onStateChange(created.value)
     notifyPhase5ProgressUpdated()
+  }
+
+  const continueLocal = () => {
+    const saved = loadSavedState()
+    if (!saved) {
+      setError('No se encontró una partida individual para continuar.')
+      return
+    }
+    setError('')
+    onStateChange(saved)
+  }
+
+  const clearInvitation = () => {
+    if (!invitationActive || typeof window === 'undefined') return
+    const url = new URL(window.location.href)
+    url.searchParams.delete('partida')
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
+    setInvitationActive(false)
+    setJoinCode('')
+  }
+
+  const showModeSelection = () => {
+    clearInvitation()
+    setEntryMode(null)
+    setNickname('')
+    setError('')
+    setOnlineMessage('')
   }
 
   const joinOnline = async (event: React.FormEvent) => {
@@ -178,51 +207,57 @@ export function OperationRescueHub({ state, onStateChange, onNavigate }: Operati
     onStateChange(restored.state)
   }
 
-  const leaveOnline = () => {
-    if (!window.confirm('¿Salir de esta partida online en este dispositivo? El progreso remoto no se borrará.')) return
-    const result = clearOnlineParticipant()
-    if (!result.ok) {
-      setError(result.error)
-      return
+  const leaveGame = () => {
+    const participant = getOnlineParticipant()
+    if (participant) {
+      if (!window.confirm('¿Salir de esta partida online? El progreso y los resultados no se borrarán.')) return
+      const result = clearOnlineParticipant()
+      if (!result.ok) {
+        setOnlineMessage(result.error)
+        return
+      }
     }
-
-    setOnlineMessage('Partida online desconectada. El modo local vuelve a estar disponible.')
     onStateChange(null)
+    showModeSelection()
+    onNavigate('operacion-rescate')
   }
 
   if (!state) {
     return (
       <div className="rescue-hub rescue-hub--welcome">
         <div className="rescue-hub__welcome-copy">
-          <span className="eyebrow">{hasInvitation ? 'Invitación a partida online' : 'Misión local · cinco etapas'}</span>
+          <span className="eyebrow">{invitationActive ? 'Invitación a partida online' : 'Misión local · cinco etapas'}</span>
           <h2>Operación Rescate</h2>
-          <p>{hasInvitation ? 'Elegí un apodo e ingresá a la partida. Tu progreso se conservará en este dispositivo y se sincronizará con la clasificación.' : <>Recuperá la información resolviendo desafíos sobre nombres, estructuras, atributos, operaciones y el programa <em>copyfile</em>. Avanzás a tu ritmo y tu mejor resultado queda guardado sólo en este dispositivo.</>}</p>
+          <p>{invitationActive ? 'Elegí un apodo e ingresá a la partida. Tu progreso se conservará en este dispositivo y se sincronizará con la clasificación.' : <>Recuperá la información resolviendo desafíos sobre nombres, estructuras, atributos, operaciones y el programa <em>copyfile</em>. Elegí juego individual o una partida multijugador.</>}</p>
         </div>
         {!entryMode && <div className="rescue-hub__identity">
           <label>¿Cómo querés jugar?</label>
           <div className="rescue-hub__entry-options">
-            <button type="button" className="primary-action" onClick={() => setEntryMode('local')}>Jugar individualmente</button>
+            <button type="button" className="primary-action" onClick={() => { setNickname(savedLocalState?.playerId ?? ''); setEntryMode('local') }}>Jugar individualmente</button>
             <button type="button" className="filelab-secondary-button" onClick={() => setEntryMode('online')}>Unirse a una partida</button>
           </div>
         </div>}
         {entryMode === 'local' && <form className="rescue-hub__identity" onSubmit={(event) => { event.preventDefault(); start() }}>
-          <label htmlFor="rescue-nickname">Elegí un apodo</label>
+          {savedLocalState && <div className="rescue-hub__saved-game"><span>Partida individual guardada</span><strong>{savedLocalState.playerId} · recorrido {savedLocalState.currentRunNumber}</strong><button type="button" className="filelab-secondary-button" onClick={continueLocal}>Continuar partida</button></div>}
+          <label htmlFor="rescue-nickname">{savedLocalState ? 'Apodo para la nueva partida' : 'Elegí un apodo'}</label>
           <input id="rescue-nickname" value={nickname} onChange={(event) => { setNickname(event.target.value); setError('') }} maxLength={32} placeholder="Ej.: Ada-42" autoComplete="nickname" />
           <small>2–24 caracteres: letras, números, espacios, guiones o guiones bajos.</small>
           {error && <p className="rescue-hub__error" role="alert">{error}</p>}
-          <button type="submit" className="primary-action">Comenzar misión <span aria-hidden="true">→</span></button>
+          <button type="submit" className="primary-action">{savedLocalState ? 'Nueva partida' : 'Comenzar misión'} <span aria-hidden="true">→</span></button>
+          <button type="button" className="filelab-secondary-button" onClick={showModeSelection}>Elegir otra modalidad</button>
         </form>}
         {entryMode === 'online' && <form className="rescue-hub__identity" onSubmit={joinOnline}>
           <label htmlFor="rescue-join-code">Código de partida</label>
-          <input id="rescue-join-code" value={joinCode} onChange={(event) => setJoinCode(event.target.value.toUpperCase())} maxLength={8} placeholder="8 caracteres" disabled={onlineBusy} readOnly={hasInvitation} />
+          <input id="rescue-join-code" value={joinCode} onChange={(event) => setJoinCode(event.target.value.toUpperCase())} maxLength={8} placeholder="8 caracteres" disabled={onlineBusy} readOnly={invitationActive} />
           <label htmlFor="rescue-online-nickname">Elegí un apodo</label>
           <input id="rescue-online-nickname" value={nickname} onChange={(event) => { setNickname(event.target.value); setOnlineMessage('') }} maxLength={32} placeholder="Ej.: Ada-42" autoComplete="nickname" disabled={onlineBusy} />
           <small>2–24 caracteres: letras, números, espacios, guiones o guiones bajos.</small>
           <button type="submit" className="primary-action" disabled={onlineBusy}>{onlineBusy ? 'Conectando…' : 'Entrar a partida online →'}</button>
+          <button type="button" className="filelab-secondary-button" onClick={showModeSelection} disabled={onlineBusy}>Elegir otra modalidad</button>
           {onlineMessage && <p className="rescue-hub__privacy" role="status">{onlineMessage}</p>}
         </form>}
         <p className="rescue-hub__privacy">El modo local y el modo online usan progresos separados. Las puntuaciones online se calculan en el navegador y no son una medida segura contra manipulaciones.</p>
-        {!hasInvitation && <TeacherSessionPanel />}
+        {!invitationActive && <TeacherSessionPanel />}
       </div>
     )
   }
@@ -234,6 +269,7 @@ export function OperationRescueHub({ state, onStateChange, onNavigate }: Operati
   const finalized = Boolean(state.finalizedAt || getOnlineParticipant()?.finishedAt)
   return (
     <div className="rescue-hub">
+      <button type="button" className="rescue-session-exit" onClick={leaveGame}>Salir de la partida</button>
       <div className="rescue-hub__header">
         <div><span className="eyebrow">{getOnlineParticipant() ? 'Partida online de' : 'Partida local de'}</span><h2>{state.playerId}</h2><p>{finalized ? 'Tu participación está finalizada.' : `Recorrido ${state.currentRunNumber}: completá las etapas en orden. Cada una admite un único resultado.`}</p></div>
         <div className="rescue-hub__total" aria-label={`Puntuación total ${score}`}><span>Primeros cuatro</span><strong>{firstFourScore}<small>/400</small></strong><span>Factory: {factoryScore} · Total: {score}</span><div><i style={{ width: `${progressPercentage(state)}%` }} /></div><small>{completed}/5 etapas completadas</small></div>
@@ -247,8 +283,8 @@ export function OperationRescueHub({ state, onStateChange, onNavigate }: Operati
         return <article key={gameId} className={`rescue-hub__stage rescue-hub__stage--${game.status}`}><div className="rescue-hub__stage-number">{GAME_IDS.indexOf(gameId) + 1}</div><div className="rescue-hub__stage-content"><span>{status}</span><h3>{details.title}</h3><p>{details.concept}</p><small>{game.attempts ? `Resultado del recorrido: ${game.bestScore}${gameId === 'escape-room' ? ' puntos' : '/100'}` : unlocked ? 'Todavía no hay un resultado evaluado.' : 'Completá la etapa anterior para continuar.'}</small>{game.lastExplanation && <em>{game.lastExplanation}</em>}</div><button type="button" onClick={() => onNavigate(details.section)} disabled={finalized || !unlocked}>{game.status === 'completed' ? 'Ver resultado' : 'Comenzar'} <span aria-hidden="true">→</span></button></article>
       })}</div>
       {completed === 5 && <section className="rescue-hub__final" aria-labelledby="rescue-final-title"><span className="eyebrow">Recorrido completo</span><h3 id="rescue-final-title">Buen trabajo, {state.playerId}</h3><div>{GAME_IDS.map((gameId) => <span key={gameId}>{GAME_DETAILS[gameId].title}: <strong>{state.games[gameId].bestScore}{gameId === 'escape-room' ? '' : '/100'}</strong></span>)}</div><p><strong>Primeros cuatro:</strong> {firstFourScore}/400 · <strong>Factory:</strong> {factoryScore} · <strong>Total:</strong> {score}</p>{state.bestRun && <p><strong>Mejor recorrido histórico:</strong> {state.bestRun.totalScore} puntos.</p>}<button type="button" className="primary-action" onClick={() => onNavigate('filelab-factory')}>Ver cierre del recorrido <span aria-hidden="true">→</span></button>{finalized && <strong>Participación finalizada</strong>}</section>}
-      {getOnlineParticipant() && <section className="rescue-ranking" aria-labelledby="rescue-ranking-title"><div><span className="eyebrow">Clasificación final</span><h3 id="rescue-ranking-title">Participantes finalizados</h3></div>{ranking.length ? <table><thead><tr><th>Posición</th><th>Apodo</th><th>Académicos</th><th>Factory</th><th>Total</th></tr></thead><tbody>{ranking.map((entry) => <tr key={`${entry.position}-${entry.nickname}`}><td>{entry.position}</td><td>{entry.nickname}</td><td>{entry.academicScore}/400</td><td>{entry.factoryScore}</td><td>{entry.totalScore}</td></tr>)}</tbody></table> : <p>Aún no hay participantes finalizados.</p>}</section>}
-      <div className="rescue-hub__footer"><p><strong>Qué vas a integrar:</strong> distinguir la identidad de un archivo de sus bytes, observar metadatos y protección, usar descriptores y cursores, transferir datos correctamente y justificar cada decisión.</p><small>{getOnlineParticipant() ? 'El recorrido actual y el mejor recorrido completo se sincronizan con la partida.' : 'El recorrido actual y el mejor recorrido completo se guardan en este dispositivo.'}</small>{getOnlineParticipant() && <button type="button" className="filelab-secondary-button" onClick={leaveOnline}>Salir de partida online</button>}</div>
+      {getOnlineParticipant() && <section className="rescue-ranking" aria-labelledby="rescue-ranking-title"><div><span className="eyebrow">Clasificación final</span><h3 id="rescue-ranking-title">Participantes finalizados</h3></div>{ranking.length ? <RankingTable entries={ranking}/> : <p>Aún no hay participantes finalizados.</p>}</section>}
+      <div className="rescue-hub__footer"><p><strong>Qué vas a integrar:</strong> distinguir la identidad de un archivo de sus bytes, observar metadatos y protección, usar descriptores y cursores, transferir datos correctamente y justificar cada decisión.</p><small>{getOnlineParticipant() ? 'El recorrido actual y el mejor recorrido completo se sincronizan con la partida.' : 'El recorrido actual y el mejor recorrido completo se guardan en este dispositivo.'}</small></div>
     </div>
   )
 }

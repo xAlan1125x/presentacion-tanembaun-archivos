@@ -4,7 +4,7 @@ import { createInitialState } from '../../game'
 const mocks = vi.hoisted(() => ({ rpc: vi.fn() }))
 vi.mock('../client', () => ({ supabase: { rpc: mocks.rpc } }))
 
-import { joinSession, loadParticipantRunState, loadSessionParticipantSummary, loadSessionRanking, saveParticipantRunState } from '../service'
+import { joinSession, loadParticipantRunState, loadPublicSessionRanking, loadSessionParticipantSummary, loadSessionRanking, saveParticipantRunState } from '../service'
 
 beforeEach(() => mocks.rpc.mockReset())
 
@@ -45,5 +45,20 @@ describe('contratos Supabase de recorridos v3', () => {
 
     expect(mocks.rpc).toHaveBeenCalledWith('get_session_participant_summary', { target_session_id: 'session-b' })
     expect(result.participants[0]).toMatchObject({ participantId: 'p-1', academicScore: 280, factoryScore: 100, totalScore: 380 })
+  })
+
+  it('consulta públicamente por código y distingue resultados provisionales y definitivos', async () => {
+    mocks.rpc.mockResolvedValue({ data: [
+      { position: 1, nickname: 'Ada', academic_score: 390, factory_score: 200, total_score: 590, finalized: false },
+      { position: 2, nickname: 'Lin', academic_score: 350, factory_score: 175, total_score: 525, finalized: true },
+    ], error: null })
+
+    const result = await loadPublicSessionRanking(' a1b2c3d4 ')
+
+    expect(mocks.rpc).toHaveBeenCalledWith('get_public_session_ranking', { requested_code: 'A1B2C3D4' })
+    expect(result.ranking).toEqual([
+      { position: 1, nickname: 'Ada', academicScore: 390, factoryScore: 200, totalScore: 590, finalized: false },
+      { position: 2, nickname: 'Lin', academicScore: 350, factoryScore: 175, totalScore: 525, finalized: true },
+    ])
   })
 })
