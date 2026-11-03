@@ -4,7 +4,6 @@ import {
   COPYFILE_HINTS,
   createInitialState,
   notifyPhase5ProgressUpdated,
-  resetGameProgress,
   saveCopyChallengeEvaluation,
   type CopyChallengeSnapshot,
   type Phase5State,
@@ -28,23 +27,18 @@ export function CopyfileChallengeGame() {
     window.addEventListener('filelab:online-progress-updated', refresh)
     return () => window.removeEventListener('filelab:online-progress-updated', refresh)
   }, [])
+  if (phaseState.games['copyfile-challenge'].status === 'completed') {
+    const result = phaseState.games['copyfile-challenge']
+    return <div className="copy-challenge-game"><section className="classification-result is-success"><div><span>Resultado definitivo del recorrido</span><strong>{result.bestScore} / 100</strong></div><p>{result.lastExplanation}</p><small>Esta etapa ya fue evaluada. Podrás repetirla al iniciar un recorrido completo nuevo.</small></section></div>
+  }
   const run = (action: (engine: CopyfileEngine) => CopyChallengeSnapshot) => setSnapshot(action(engineRef.current!))
   const submit = () => {
     const evaluation = engineRef.current!.evaluate()
     setPhaseState(saveCopyChallengeEvaluation(phaseState, evaluation))
     const saved = saveActiveGameState(saveCopyChallengeEvaluation(phaseState, evaluation))
     notifyPhase5ProgressUpdated()
-    setMessage(saved && !saved.ok ? saved.error : `Resultado guardado: ${evaluation.score}/200.`)
+    setMessage(saved && !saved.ok ? saved.error : `Resultado guardado: ${evaluation.score}/100.`)
     setSnapshot(engineRef.current!.snapshot())
-  }
-  const reset = () => {
-    const next = resetGameProgress(phaseState, 'copyfile-challenge')
-    engineRef.current = new CopyfileEngine()
-    setPhaseState(next)
-    setSnapshot(engineRef.current.snapshot())
-    const saved = saveActiveGameState(next)
-    notifyPhase5ProgressUpdated()
-    setMessage(saved && !saved.ok ? saved.error : 'Desafío reiniciado. Las otras etapas no se modificaron.')
   }
   const source = snapshot.lab.engine.files.find((file) => file.id === 'source')
   const destination = snapshot.lab.engine.files.find((file) => file.id === 'destination')
@@ -54,7 +48,7 @@ export function CopyfileChallengeGame() {
     <div className="copy-challenge-game">
       <div className="copy-challenge__intro">
         <div><span className="eyebrow">Operación Rescate · 5.5</span><h2>Copyfile Challenge</h2><p>El destino conserva datos viejos. Ejecutá el ciclo de Tanenbaum con operaciones reales: leé, escribí la cantidad válida, repetí hasta EOF y cerrá los descriptores.</p></div>
-        <div className="copy-challenge-score"><span>Mejor resultado</span><strong>{phaseState.games['copyfile-challenge'].bestScore}<small>/200</small></strong><small>{phaseState.games['copyfile-challenge'].attempts} intento(s)</small></div>
+        <div className="copy-challenge-score"><span>Mejor resultado</span><strong>{phaseState.games['copyfile-challenge'].bestScore}<small>/100</small></strong><small>{phaseState.games['copyfile-challenge'].attempts} intento(s)</small></div>
       </div>
       <div className="copy-challenge-mission"><span>Objetivo</span><p>El destino debe quedar idéntico al origen. Una lectura parcial no es un error y EOF es un resultado exitoso; una escritura parcial exige continuar con los bytes pendientes.</p></div>
       <div className="copy-challenge-files">
@@ -88,7 +82,7 @@ export function CopyfileChallengeGame() {
         <div>{snapshot.actions.slice().reverse().map((action) => <article key={action.id} className={action.ok ? 'is-ok' : 'is-error'}><b>{action.id}</b><code>{action.name}</code><p>{action.message}</p></article>)}</div>
       </section>
       <div className="copy-challenge-hints"><span>Pistas opcionales</span>{COPYFILE_HINTS.map((hint) => <button type="button" key={hint.id} onClick={() => run((engine) => engine.useHint(hint.id))} disabled={snapshot.hintsUsed.includes(hint.id)}>{snapshot.hintsUsed.includes(hint.id) ? hint.text : `Pedir pista (-${hint.penaltyPoints})`}</button>)}</div>
-      <div className="copy-challenge-actions"><button type="button" className="primary-action" onClick={submit}>Comprobar copia <span aria-hidden="true">→</span></button><button type="button" className="filelab-secondary-button" onClick={reset}>Reiniciar desafío</button><span>{snapshot.completed ? 'Copia completa' : 'Destino todavía no validado'}</span></div>
+      <div className="copy-challenge-actions"><button type="button" className="primary-action" onClick={submit}>Comprobar copia <span aria-hidden="true">→</span></button><span>{snapshot.completed ? 'Copia completa' : 'Destino todavía no validado'}</span></div>
       {message && <p className="copy-challenge-persistence" role="status">{message}</p>}
     </div>
   )

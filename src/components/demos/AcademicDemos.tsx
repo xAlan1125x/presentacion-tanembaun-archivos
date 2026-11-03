@@ -64,20 +64,47 @@ export function TypesDemo() {
   const [selected, setSelected] = useState<FileSnapshot>(snapshot.engine.files[0])
   const [message, setMessage] = useState('Seleccioná un tipo y pedí al motor que lo abra.')
   const [bytes, setBytes] = useState<Uint8Array>()
+  const [terminalInput, setTerminalInput] = useState('')
+  const [terminalReceived, setTerminalReceived] = useState('')
+  const [selectedBlock, setSelectedBlock] = useState<number>()
+  const blocks = [
+    { number: 0, data: '4F 53 2D 30 31', label: 'cabecera del sistema' },
+    { number: 1, data: '46 49 4C 45 4C 41 42', label: 'datos de FileLab' },
+    { number: 2, data: '00 01 02 03 04 05', label: 'índice de bloques' },
+    { number: 3, data: 'FF EE DD CC BB AA', label: 'bloque de respaldo' },
+  ]
   const inspect = (file: FileSnapshot) => {
     setSelected(file); setBytes(undefined)
+    setTerminalReceived(''); setSelectedBlock(undefined)
     const opened = session.open(file.id, 'read')
-    if (!opened.ok) { setMessage(`${opened.error.code}: FileLab representa ${file.type}, pero no inventa una semántica de lectura para este tipo especial.`); refresh(); return }
+    if (!opened.ok) {
+      setMessage(file.type === 'character-special'
+        ? 'terminal.char representa una terminal: escribí un mensaje para simular su recepción.'
+        : 'disco.block representa un dispositivo de bloques: seleccioná un bloque para inspeccionar sus datos.')
+      refresh()
+      return
+    }
     const read = session.read(opened.value.descriptor, file.size)
     session.close(opened.value.descriptor)
     if (read.ok) { const valid = read.value.buffer.data.slice(0, read.value.buffer.validLength); setBytes(valid); setMessage(file.format === 'ascii' ? 'Archivo regular de texto: los bytes se interpretan como caracteres.' : 'Archivo regular binario: las posiciones son bytes, pero no todos representan texto legible.') }
     refresh()
   }
-  const reset = () => { restore(); setSelected(session.snapshot().engine.files[0]); setBytes(undefined); setMessage('Escenario restaurado.') }
+  const sendToTerminal = () => {
+    const value = terminalInput.trim()
+    if (!value) return
+    setTerminalReceived(value)
+    setTerminalInput('')
+    setMessage(`La terminal recibió “${value}”. Es una simulación de E/S de caracteres, no una terminal real.`)
+  }
+  const selectBlock = (block: typeof blocks[number]) => {
+    setSelectedBlock(block.number)
+    setMessage(`Bloque ${block.number} seleccionado: ${block.label}. Es una simulación educativa de almacenamiento por bloques, no acceso a un disco real.`)
+  }
+  const reset = () => { restore(); setSelected(session.snapshot().engine.files[0]); setBytes(undefined); setTerminalInput(''); setTerminalReceived(''); setSelectedBlock(undefined); setMessage('Escenario restaurado.') }
   return (
     <DemoFrame number="03" title="La evidencia está en los bytes" description="Regular no significa texto; los especiales representan dispositivos en sistemas como UNIX." onReset={reset}>
       <div className="types-demo"><div className="type-file-grid">{snapshot.engine.files.map((file) => <button type="button" key={file.id} className={selected.id === file.id ? 'is-active' : ''} onClick={() => inspect(file)}><span>{file.type === 'regular' ? (file.format === 'ascii' ? 'TXT' : 'BIN') : file.type === 'character-special' ? 'CHR' : 'BLK'}</span><strong>{file.name}</strong><small>{file.type}</small></button>)}</div>
-        <div className="type-inspector"><header><strong>{selected.name}</strong><span>{selected.type} · {selected.format}</span></header>{bytes ? <><HexView bytes={bytes} />{selected.format === 'ascii' && <pre>{decoder.decode(bytes)}</pre>}</> : <div className="special-placeholder">La apertura devolvió un error controlado.</div>}</div>
+        <div className="type-inspector"><header><strong>{selected.name}</strong><span>{selected.type} · {selected.format}</span></header>{bytes ? <><HexView bytes={bytes} />{selected.format === 'ascii' && <pre>{decoder.decode(bytes)}</pre>}</> : selected.type === 'character-special' ? <div className="special-simulation"><p>Dispositivo especial de caracteres: recibe un flujo de datos.</p><label htmlFor="terminal-message">Mensaje para la terminal</label><div><input id="terminal-message" value={terminalInput} onChange={(event) => setTerminalInput(event.target.value)} placeholder="Escribí un mensaje" /><button type="button" onClick={sendToTerminal}>Enviar</button></div>{terminalReceived && <output>Recepción: {terminalReceived}</output>}<small>Simulación educativa; no accede al hardware real.</small></div> : selected.type === 'block-special' ? <div className="special-simulation"><p>Dispositivo especial de bloques: seleccioná una unidad de almacenamiento.</p><div className="block-grid">{blocks.map((block) => <button type="button" key={block.number} className={selectedBlock === block.number ? 'is-active' : ''} onClick={() => selectBlock(block)}><strong>Bloque {block.number}</strong><code>{block.data}</code><small>{block.label}</small></button>)}</div><small>Simulación educativa; no accede a un disco real.</small></div> : <div className="special-placeholder">Seleccioná un archivo para inspeccionarlo.</div>}</div>
         <div className="demo-result"><span>Conclusión</span><p>{message}</p></div></div>
     </DemoFrame>
   )
@@ -86,13 +113,14 @@ export function TypesDemo() {
 export function AccessDemo() {
   const { session, snapshot, refresh, reset: restore } = useDemoSession('academic-access')
   const [descriptor, setDescriptor] = useState<number>()
+  const [lastReadPosition, setLastReadPosition] = useState<number>()
   const [message, setMessage] = useState('El cursor empieza en 0. Cada registro ocupa 2 bytes.')
   const ensureOpen = () => { if (descriptor !== undefined) return descriptor; const opened = session.open('flights','read'); if (!opened.ok) return undefined; setDescriptor(opened.value.descriptor); return opened.value.descriptor }
-  const read = () => { const fd=ensureOpen(); if(fd===undefined)return; const result=session.read(fd,2); setMessage(result.ok ? result.value.outcome === 'eof' ? 'EOF: lectura exitosa con 0 bytes; no es un error.' : `Leído “${decoder.decode(result.value.buffer.data.slice(0,result.value.buffer.validLength))}”; cursor ${result.value.positionBefore} → ${result.value.positionAfter}.` : describe(result)); refresh() }
-  const jump = (record: number) => { const fd=ensureOpen(); if(fd===undefined)return; const seek=session.seek(fd,record*2); if(!seek.ok){setMessage(describe(seek));refresh();return} const result=session.read(fd,2); setMessage(result.ok ? `seek llevó el cursor a ${record*2}; se leyó directamente “${decoder.decode(result.value.buffer.data.slice(0,result.value.buffer.validLength))}”.` : describe(result)); refresh() }
-  const reset=()=>{restore();setDescriptor(undefined);setMessage('Cursor cerrado y escenario restaurado.')}
+  const read = () => { const fd=ensureOpen(); if(fd===undefined)return; const result=session.read(fd,2); setLastReadPosition(result.ok && result.value.outcome !== 'eof' ? result.value.positionBefore : undefined); setMessage(result.ok ? result.value.outcome === 'eof' ? 'EOF: lectura exitosa con 0 bytes; no es un error.' : `Leído “${decoder.decode(result.value.buffer.data.slice(0,result.value.buffer.validLength))}”; cursor ${result.value.positionBefore} → ${result.value.positionAfter}.` : describe(result)); refresh() }
+  const jump = (record: number) => { const fd=ensureOpen(); if(fd===undefined)return; const seek=session.seek(fd,record*2); if(!seek.ok){setMessage(describe(seek));refresh();return} const result=session.read(fd,2); setLastReadPosition(result.ok && result.value.outcome !== 'eof' ? result.value.positionBefore : undefined); setMessage(result.ok ? `seek llevó el cursor a ${record*2}; se leyó directamente “${decoder.decode(result.value.buffer.data.slice(0,result.value.buffer.validLength))}”.` : describe(result)); refresh() }
+  const reset=()=>{restore();setDescriptor(undefined);setLastReadPosition(undefined);setMessage('Cursor cerrado y escenario restaurado.')}
   const position=snapshot.engine.processes[0].openFiles.find((handle)=>handle.descriptor===descriptor)?.position ?? 0
-  return <DemoFrame number="04" title="Recorrer o saltar" description="La posición actual pertenece al descriptor abierto." onReset={reset}><div className="access-demo"><div className="record-track interactive-track">{['A1','B2','C3','D4','E5'].map((record,index)=><button type="button" key={record} className={position===index*2?'is-cursor':''} onClick={()=>jump(index)}><small>{index*2}</small><strong>{record}</strong></button>)}<span className="cursor-label" style={{'--cursor':Math.min(position/2,4)} as React.CSSProperties}>▲ cursor {position}</span></div><div className="demo-actions"><button type="button" onClick={read}>Leer siguiente registro</button><button type="button" onClick={()=>jump(3)}>seek(6) + read(2)</button><button type="button" onClick={()=>{const fd=ensureOpen();if(fd!==undefined){session.seek(fd,10);refresh();setMessage('Cursor situado al final. La próxima lectura mostrará EOF.')}}}>Ir al final</button></div><div className="demo-result"><span>Resultado</span><p>{message}</p></div></div></DemoFrame>
+  return <DemoFrame number="04" title="Recorrer o saltar" description="Cada registro ocupa 2 bytes: se distingue lo leído, el cursor actual y el próximo registro." onReset={reset}><div className="access-demo"><div className="record-track interactive-track">{['A1','B2','C3','D4','E5'].map((record,index)=><button type="button" key={record} className={`${lastReadPosition === index*2 ? 'is-read' : ''} ${position === index*2 ? 'is-next' : ''}`} onClick={()=>jump(index)}><small>{index*2}</small><strong>{record}</strong>{lastReadPosition === index*2 && <em>leído</em>}{position === index*2 && <em>próximo</em>}</button>)}<span className="cursor-label" style={{'--cursor':Math.min(position/2,5)} as React.CSSProperties}>▲ cursor {position}</span></div><div className="demo-actions"><button type="button" onClick={read}>Leer siguiente registro</button><button type="button" onClick={()=>jump(3)}>seek(6) + read(2)</button><button type="button" onClick={()=>{const fd=ensureOpen();if(fd!==undefined){session.seek(fd,10);setLastReadPosition(undefined);refresh();setMessage('Cursor situado al final. La próxima lectura mostrará EOF.')}}}>Ir al final</button></div><div className="demo-result"><span>Resultado</span><p>{message}</p></div></div></DemoFrame>
 }
 
 export function AttributesDemo() {
@@ -136,13 +164,46 @@ export function OperationsDemo() {
 }
 
 const copyCode = [
-  'in = open(origen, O_RDONLY);',
-  'out = creat(destino, MODO);',
-  'while ((n = read(in, buffer, 4096)) > 0)',
-  '  write(out, buffer, n);',
-  '/* n == 0: fin de archivo */',
-  'close(in);',
-  'close(out);',
+  { text: '/* Programa para copiar archivos. La verificación y el reporte de errores son mínimos. */' },
+  { text: '#include <sys/types.h>' },
+  { text: '#include <fcntl.h>' },
+  { text: '#include <stdlib.h>' },
+  { text: '#include <unistd.h>' },
+  { text: '' },
+  { text: 'int main(int argc, char *argv[]);                         /* prototipo ANSI */' },
+  { text: '' },
+  { text: '#define TAM_BUF 4096                                      /* usa un tamaño de búfer de 4096 bytes */' },
+  { text: '#define MODO_SALIDA 0700                                  /* bits de protección para el archivo de salida */' },
+  { text: '' },
+  { text: 'int main(int argc, char *argv[])' },
+  { text: '{' },
+  { text: '        int ent_da, sal_da, leer_cuenta, escribir_cuenta;' },
+  { text: '        char bufer[TAM_BUF];' },
+  { text: '' },
+  { text: '        if (argc != 3) exit(1);                           /* error de sintaxis si argc no es 3 */' },
+  { text: '' },
+  { text: '        /* Abre el archivo de entrada y crea el archivo de salida */' },
+  { text: '        ent_da = open(argv[1], O_RDONLY);                  /* abre el archivo fuente */', step: 1 },
+  { text: '        if (ent_da < 0) exit(2);                           /* si no se puede abrir, termina */' },
+  { text: '        sal_da = creat(argv[2], MODO_SALIDA);              /* crea el archivo de destino */', step: 2 },
+  { text: '        if (sal_da < 0) exit(3);                           /* si no se puede crear, termina */' },
+  { text: '' },
+  { text: '        /* Ciclo de copia */' },
+  { text: '        while (TRUE) {' },
+  { text: '                leer_cuenta = read(ent_da, bufer, TAM_BUF); /* lee un bloque de datos */', step: 3 },
+  { text: '                if (leer_cuenta <= 0) break;               /* si llega al fin de archivo o hay un error, sale del ciclo */', step: 5 },
+  { text: '                escribir_cuenta = write(sal_da, bufer, leer_cuenta); /* escribe los datos */', step: 4 },
+  { text: '                if (escribir_cuenta <= 0) exit(4);         /* escribir_cuenta <= 0 es un error */' },
+  { text: '        }' },
+  { text: '' },
+  { text: '        /* Cierra los archivos */' },
+  { text: '        close(ent_da);', step: 6 },
+  { text: '        close(sal_da);', step: 7 },
+  { text: '        if (leer_cuenta == 0)                               /* no hubo error en la última lectura */' },
+  { text: '                exit(0);' },
+  { text: '        else' },
+  { text: '                exit(5);                                   /* hubo un error en la última lectura */' },
+  { text: '}' },
 ]
 export function CopyfileDemo() {
   const simulationRef=useRef(new CopyfileSimulation())
@@ -151,5 +212,5 @@ export function CopyfileDemo() {
   const state=snapshot.state
   const source=snapshot.lab.engine.files.find((file)=>file.id==='source')!
   const destination=snapshot.lab.engine.files.find((file)=>file.id==='destination')!
-  return <DemoFrame number="07" title="Copyfile, llamada por llamada" description="Flujo conceptualmente fiel al ejemplo C; las comprobaciones robustas se explican aparte." onReset={reset}><div className="copyfile-demo"><div className="copy-visual"><article><span>Origen</span><strong>{source.name}</strong><b>{source.size} B</b><small>fd {state.inputDescriptor??'—'}</small></article><div className="live-buffer"><span>Búfer · capacidad 4096 B</span><div><i style={{width:`${Math.min(100,(state.pendingBytes.length/4096)*100)}%`}} /></div><strong>{state.pendingBytes.length} byte(s) pendientes</strong><small>última lectura {state.lastRead} · última escritura {state.lastWrite}</small></div><article><span>Destino</span><strong>{destination.name}</strong><b>{destination.size} B</b><small>fd {state.outputDescriptor??'—'}</small></article></div><div className="copy-workbench"><pre>{copyCode.map((line,index)=><code key={line} className={state.activeLine===index+1?'is-active':''}><span>{index+1}</span>{line}</code>)}</pre><div className="copy-stats"><div><span>Total copiado</span><strong>{state.bytesCopied} / 9500 B</strong></div><div><span>Iteraciones escritas</span><strong>{state.iterations}</strong></div><div><span>Próxima llamada</span><strong>{state.nextAction}</strong></div><button type="button" disabled={state.completed||state.nextAction==='error'} onClick={()=>setSnapshot(simulationRef.current.next())}>{state.completed?'Copia completa':'Ejecutar siguiente llamada →'}</button></div></div><div className="demo-result"><span>Traza sincronizada</span><p>{state.message}</p></div><p className="robustness-note"><strong>Complemento de robustez:</strong> un programa real debe tratar errores y escrituras parciales. El ejemplo del libro considera error si <code>write</code> no devuelve exactamente <code>n</code>.</p></div></DemoFrame>
+  return <DemoFrame number="07" title="Copyfile, llamada por llamada" description="Código completo de ejemplo y animación de sus operaciones principales." onReset={reset}><div className="copyfile-demo"><div className="copy-visual"><article><span>Origen</span><strong>{source.name}</strong><b>{source.size} B</b><small>fd {state.inputDescriptor??'—'}</small></article><div className="live-buffer"><span>Búfer · capacidad 4096 B</span><div><i style={{width:`${Math.min(100,(state.pendingBytes.length/4096)*100)}%`}} /></div><strong>{state.pendingBytes.length} byte(s) pendientes</strong><small>última lectura {state.lastRead} · última escritura {state.lastWrite}</small></div><article><span>Destino</span><strong>{destination.name}</strong><b>{destination.size} B</b><small>fd {state.outputDescriptor??'—'}</small></article></div><div className="copy-workbench"><pre>{copyCode.map((line,index)=><code key={`${index}-${line.text}`} className={state.activeLine===line.step?'is-active':''}><span>{index+1}</span>{line.text}</code>)}</pre><div className="copy-stats"><div><span>Total copiado</span><strong>{state.bytesCopied} / 9500 B</strong></div><div><span>Iteraciones escritas</span><strong>{state.iterations}</strong></div><div><span>Próxima llamada</span><strong>{state.nextAction}</strong></div><button type="button" disabled={state.completed||state.nextAction==='error'} onClick={()=>setSnapshot(simulationRef.current.next())}>{state.completed?'Copia completa':'Ejecutar siguiente llamada →'}</button></div></div><div className="demo-result"><span>Traza sincronizada</span><p>{state.message}</p></div><p className="robustness-note"><strong>Complemento de robustez:</strong> la simulación ejecuta las llamadas principales y conserva las comprobaciones de error visibles en el ejemplo.</p></div></DemoFrame>
 }

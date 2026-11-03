@@ -59,7 +59,7 @@ const PRACTICE_SCENARIOS: LabScenario[] = [
         },
         {
           id: 'copyfile', name: 'copyfile.c', format: 'ascii',
-          content: encoder.encode('/* Extracto didáctico; el ejemplo completo se trabajará en fase 4. */\nwhile ((n = read(in, buffer, 4096)) > 0) write(out, buffer, n);'),
+          content: encoder.encode('/* Fragmento simplificado de copyfile. Su funcionamiento se explica en la sección 4.1.7 */\nwhile ((n = read(in, buffer, 4096)) > 0) write(out, buffer, n);'),
           attributes: { ownerId: 'estudiante', creatorId: 'estudiante', protection: protection() },
         },
         {

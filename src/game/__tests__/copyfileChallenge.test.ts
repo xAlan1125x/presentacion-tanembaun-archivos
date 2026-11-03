@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   CopyfileChallenge,
   createInitialState,
+  recordEvaluation,
   saveCopyChallengeEvaluation,
 } from '..'
 
@@ -56,7 +57,7 @@ describe('CopyfileChallenge', () => {
     completeCopy(game)
     const evaluation = game.evaluate()
     expect(evaluation.completed).toBe(true)
-    expect(evaluation.score).toBe(200)
+    expect(evaluation.score).toBe(100)
     expect(evaluation.bytesMatch).toBe(true)
     expect(evaluation.descriptorsClosed).toBe(true)
   })
@@ -66,9 +67,13 @@ describe('CopyfileChallenge', () => {
     game.useHint('partial')
     completeCopy(game)
     const evaluation = game.evaluate()
-    expect(evaluation.score).toBe(190)
-    const state = saveCopyChallengeEvaluation(createInitialState('player'), evaluation, '2025-01-01T00:00:00.000Z')
-    expect(state.games['copyfile-challenge'].bestScore).toBe(190)
+    expect(evaluation.score).toBe(95)
+    const unlocked = (['classify-files', 'digital-detective', 'repair-system'] as const).reduce(
+      (state, gameId) => recordEvaluation(state, gameId, { score: 100, completed: true, explanation: 'Lista.' }),
+      createInitialState('player'),
+    )
+    const state = saveCopyChallengeEvaluation(unlocked, evaluation, '2025-01-01T00:00:00.000Z')
+    expect(state.games['copyfile-challenge'].bestScore).toBe(95)
     expect(state.games['copyfile-challenge'].attempts).toBe(1)
   })
 

@@ -1,204 +1,148 @@
-import { FileLabSession, type LabSessionSnapshot } from '../lab'
 import { evaluateResolution, recordEvaluation } from './rules'
 import type { GameEvaluation, Phase5State } from './types'
 
-export type RepairActionName = 'set-readonly' | 'open-protected' | 'write-protected' | 'invalid-read' | 'open-records' | 'read-records' | 'open-sequence' | 'seek-sequence' | 'read-sequence' | 'close-all'
-
-export interface RepairAction {
-  id: number
-  name: RepairActionName
-  ok: boolean
-  message: string
+export interface RepairOption {
+  id: string
+  label: string
+  correct: boolean
 }
 
 export interface RepairChallenge {
   id: string
   title: string
-  goal: string
+  situation: string
+  question: string
+  options: RepairOption[]
   explanation: string
 }
 
+export interface RepairAnswer {
+  challengeId: string
+  optionId: string
+  correct: boolean
+}
+
 export interface RepairSnapshot {
-  lab: LabSessionSnapshot
-  actions: RepairAction[]
   challenges: RepairChallenge[]
-  solvedChallengeIds: string[]
-  hintsUsed: string[]
-  message: string
+  currentIndex: number
+  answers: RepairAnswer[]
+  feedback: string
   completed: boolean
 }
 
 export interface RepairEvaluation extends GameEvaluation {
   solvedChallengeIds: string[]
   failedActionCount: number
-  hintsUsed: string[]
 }
 
 export const REPAIR_CHALLENGES: RepairChallenge[] = [
-  { id: 'permissions', title: 'Desbloquear el reporte', goal: 'Modificar el atributo de sólo lectura y escribir el contenido de reparación.', explanation: 'La bandera readOnly bloqueaba la escritura. Primero había que cambiar el atributo y después escribir con un descriptor abierto en modo compatible.' },
-  { id: 'descriptor', title: 'Recuperar el descriptor', goal: 'Abrir registros.txt y completar una lectura válida después del intento inválido.', explanation: 'Un descriptor no existe hasta open. El error INVALID_DESCRIPTOR no se arregla repitiendo read: hay que abrir el archivo y usar el descriptor devuelto.' },
-  { id: 'cursor', title: 'Encontrar el registro', goal: 'Reposicionar secuencia.txt en 4 y leer desde esa posición.', explanation: 'seek modifica la posición asociada al descriptor. La lectura esperada comienza en el offset 4 y devuelve 456789.' },
-  { id: 'order', title: 'Cerrar el ciclo', goal: 'Completar operaciones válidas y cerrar todos los descriptores abiertos.', explanation: 'Las operaciones dependen del estado: abrir antes de leer o escribir y cerrar después. Un estado final sin descriptores confirma el cierre del ciclo.' },
-]
-
-export const REPAIR_HINTS = [
-  { id: 'permissions', text: 'Consultá o cambiá readOnly antes de intentar guardar el reporte.', penaltyPoints: 10 },
-  { id: 'descriptor', text: 'El número 99 no identifica un descriptor abierto; usá el que devuelve open.', penaltyPoints: 10 },
-  { id: 'cursor', text: 'La posición inicial es 0; necesitás seek(4) antes de leer.', penaltyPoints: 10 },
+  {
+    id: 'permissions',
+    title: 'Archivo de sólo lectura',
+    situation: 'Necesitás guardar cambios, pero reporte.txt tiene activa la bandera readOnly.',
+    question: '¿Qué deberías hacer antes de escribir?',
+    options: [
+      { id: 'open-write', label: 'Abrirlo en modo escritura para reemplazar la bandera', correct: false },
+      { id: 'remove-readonly', label: 'Quitar la protección de sólo lectura', correct: true },
+      { id: 'append', label: 'Usar append para no sobrescribir los datos existentes', correct: false },
+    ],
+    explanation: 'readOnly impide escribir. Primero hay que quitar esa protección y luego realizar la escritura.',
+  },
+  {
+    id: 'descriptor',
+    title: 'Descriptor inválido',
+    situation: 'El proceso intentó usar read con un descriptor que no está abierto.',
+    question: '¿Cómo obtiene un descriptor válido?',
+    options: [
+      { id: 'reuse', label: 'Reutilizando un descriptor abierto para otro archivo', correct: false },
+      { id: 'seek-descriptor', label: 'Aplicando seek al número de descriptor inválido', correct: false },
+      { id: 'open', label: 'Abriendo el archivo y usando el descriptor devuelto', correct: true },
+    ],
+    explanation: 'open devuelve un descriptor válido para ese proceso. Las operaciones posteriores deben usarlo.',
+  },
+  {
+    id: 'seek',
+    title: 'Acceso a otra posición',
+    situation: 'Necesitás leer un dato ubicado más adelante sin recorrer todo lo anterior.',
+    question: '¿Qué operación permite mover el cursor?',
+    options: [
+      { id: 'seek', label: 'seek', correct: true },
+      { id: 'read-all', label: 'Hacer read repetidamente hasta llegar a esa posición', correct: false },
+      { id: 'reopen', label: 'Cerrar y volver a abrir el archivo', correct: false },
+    ],
+    explanation: 'seek reposiciona el cursor del descriptor. Después se puede leer desde la nueva posición.',
+  },
+  {
+    id: 'close',
+    title: 'Finalización',
+    situation: 'El proceso terminó de trabajar con el archivo y ya no necesita el descriptor.',
+    question: '¿Qué operación corresponde?',
+    options: [
+      { id: 'seek-end', label: 'Mover el cursor al final del archivo', correct: false },
+      { id: 'wait', label: 'Dejar el descriptor abierto hasta que termine el proceso', correct: false },
+      { id: 'close', label: 'Cerrar el descriptor con close', correct: true },
+    ],
+    explanation: 'close cierra el descriptor cuando el proceso termina de usar el archivo; no elimina el archivo.',
+  },
 ]
 
 export class RepairSystemGame {
-  private session = new FileLabSession('repair-system')
-  private actions: RepairAction[] = []
-  private hintsUsed: string[] = []
-  private message = 'Inspeccioná el sistema y elegí una herramienta para comenzar.'
+  private currentIndex = 0
+  private answers: RepairAnswer[] = []
+  private feedback = 'Elegí una respuesta para resolver el primer problema.'
+  private finished = false
 
   snapshot(): RepairSnapshot {
-    const solvedChallengeIds = this.solvedChallengeIds()
     return {
-      lab: this.session.snapshot(),
-      actions: this.actions.map((action) => ({ ...action })),
       challenges: REPAIR_CHALLENGES,
-      solvedChallengeIds,
-      hintsUsed: [...this.hintsUsed],
-      message: this.message,
-      completed: solvedChallengeIds.length === REPAIR_CHALLENGES.length,
+      currentIndex: this.currentIndex,
+      answers: this.answers.map((answer) => ({ ...answer })),
+      feedback: this.feedback,
+      completed: this.finished,
     }
+  }
+
+  answer(optionId: string): RepairSnapshot {
+    const challenge = REPAIR_CHALLENGES[this.currentIndex]
+    if (!challenge || this.answers.some((answer) => answer.challengeId === challenge.id)) return this.snapshot()
+    const option = challenge.options.find((candidate) => candidate.id === optionId)
+    if (!option) return this.snapshot()
+    this.answers.push({ challengeId: challenge.id, optionId, correct: option.correct })
+    this.feedback = (option.correct ? 'Correcto. ' : 'No es la opción adecuada. ') + challenge.explanation
+    return this.snapshot()
+  }
+
+  advance(): RepairSnapshot {
+    const challenge = REPAIR_CHALLENGES[this.currentIndex]
+    if (!challenge || !this.answers.some((answer) => answer.challengeId === challenge.id)) return this.snapshot()
+    if (this.currentIndex < REPAIR_CHALLENGES.length - 1) {
+      this.currentIndex += 1
+      this.feedback = 'Leé la situación y elegí una respuesta.'
+    } else {
+      this.finished = true
+    }
+    return this.snapshot()
   }
 
   restore(): RepairSnapshot {
-    this.session = new FileLabSession('repair-system')
-    this.actions = []
-    this.hintsUsed = []
-    this.message = 'Escenario restaurado: los cuatro problemas vuelven a estar activos.'
-    return this.snapshot()
-  }
-
-  inspect(fileId: string): RepairSnapshot {
-    const result = this.session.getAttributes(fileId)
-    this.message = result.ok ? `Atributos de ${fileId}: ${result.value.attributes.readOnly ? 'sólo lectura activa.' : 'escritura permitida.'}` : result.error.message
-    this.session.interfaceAction('inspeccionar', this.message)
-    return this.snapshot()
-  }
-
-  setReadOnly(enabled: boolean): RepairSnapshot {
-    return this.run('set-readonly', 'setAttributes', () => this.session.setAttributes('protected', { readOnly: enabled }))
-  }
-
-  openProtected(): RepairSnapshot {
-    return this.run('open-protected', 'open', () => this.session.open('protected', 'read-write'))
-  }
-
-  writeProtected(): RepairSnapshot {
-    const descriptor = this.openDescriptorFor('protected')
-    return this.run('write-protected', 'write', () => descriptor === undefined
-      ? this.invalidResult('No hay descriptor válido para reporte-protegido.txt.')
-      : this.session.write(descriptor, new TextEncoder().encode('REPARADO')))
-  }
-
-  invalidRead(): RepairSnapshot {
-    return this.run('invalid-read', 'read', () => this.session.read(99, 4))
-  }
-
-  openRecords(): RepairSnapshot {
-    return this.run('open-records', 'open', () => this.session.open('records', 'read'))
-  }
-
-  readRecords(): RepairSnapshot {
-    const descriptor = this.openDescriptorFor('records')
-    return this.run('read-records', 'read', () => descriptor === undefined
-      ? this.invalidResult('Abrí registros.txt para obtener su descriptor.')
-      : this.session.read(descriptor, 6))
-  }
-
-  openSequence(): RepairSnapshot {
-    return this.run('open-sequence', 'open', () => this.session.open('sequence', 'read'))
-  }
-
-  seekSequence(): RepairSnapshot {
-    const descriptor = this.openDescriptorFor('sequence')
-    return this.run('seek-sequence', 'seek', () => descriptor === undefined
-      ? this.invalidResult('Abrí secuencia.txt antes de reposicionar su cursor.')
-      : this.session.seek(descriptor, 4))
-  }
-
-  readSequence(): RepairSnapshot {
-    const descriptor = this.openDescriptorFor('sequence')
-    return this.run('read-sequence', 'read', () => descriptor === undefined
-      ? this.invalidResult('Abrí secuencia.txt y ejecutá seek antes de leer.')
-      : this.session.read(descriptor, 6))
-  }
-
-  closeAll(): RepairSnapshot {
-    const handles = this.session.snapshot().engine.processes[0]?.openFiles ?? []
-    if (handles.length === 0) {
-      this.record('close-all', false, 'No había descriptores abiertos para cerrar.')
-      return this.snapshot()
-    }
-    let closed = 0
-    for (const handle of handles) {
-      const result = this.session.close(handle.descriptor)
-      if (result.ok) closed += 1
-    }
-    this.record('close-all', closed === handles.length, `${closed} descriptor(es) cerrado(s).`)
-    return this.snapshot()
-  }
-
-  useHint(id: string): RepairSnapshot {
-    const hint = REPAIR_HINTS.find((item) => item.id === id)
-    if (hint && !this.hintsUsed.includes(id)) {
-      this.hintsUsed.push(id)
-      this.message = `${hint.text} Penalización: ${hint.penaltyPoints} puntos.`
-    }
+    this.currentIndex = 0
+    this.answers = []
+    this.finished = false
+    this.feedback = 'Juego reiniciado. Volvés al problema 1 de 4.'
     return this.snapshot()
   }
 
   evaluate(): RepairEvaluation {
-    const snapshot = this.snapshot()
-    const solved = snapshot.solvedChallengeIds
-    const penaltyPoints = this.hintsUsed.reduce((sum, id) => sum + (REPAIR_HINTS.find((hint) => hint.id === id)?.penaltyPoints ?? 0), 0)
-    const explanation = snapshot.completed
-      ? 'Sistema reparado: los atributos permiten escribir, las lecturas usan descriptores válidos, el cursor encontró los datos y no quedaron descriptores abiertos.'
-      : `Todavía faltan: ${REPAIR_CHALLENGES.filter((challenge) => !solved.includes(challenge.id)).map((challenge) => challenge.title).join(', ')}. Las acciones incorrectas no cuentan como reparación.`
+    const solvedChallengeIds = this.answers.filter((answer) => answer.correct).map((answer) => answer.challengeId)
+    const completed = this.finished
+    const explanation = completed
+      ? 'Resolviste correctamente ' + solvedChallengeIds.length + ' de 4 problemas sobre protección, descriptores, seek y close.'
+      : 'Respondé los ' + (REPAIR_CHALLENGES.length - this.answers.length) + ' problemas restantes antes de finalizar.'
     return {
-      ...evaluateResolution({ resolutionQuality: solved.length / REPAIR_CHALLENGES.length, completed: snapshot.completed, penaltyPoints }, explanation),
-      solvedChallengeIds: solved,
-      failedActionCount: this.actions.filter((action) => !action.ok).length,
-      hintsUsed: [...this.hintsUsed],
+      ...evaluateResolution({ resolutionQuality: solvedChallengeIds.length / REPAIR_CHALLENGES.length, completed }, explanation),
+      solvedChallengeIds,
+      failedActionCount: this.answers.filter((answer) => !answer.correct).length,
     }
-  }
-
-  private openDescriptorFor(fileId: string): number | undefined {
-    return this.session.snapshot().engine.processes[0]?.openFiles.find((handle) => handle.fileId === fileId)?.descriptor
-  }
-
-  private run(name: RepairActionName, operation: string, action: () => { ok: boolean; error?: { message: string } }): RepairSnapshot {
-    const result = action()
-    this.record(name, result.ok, result.ok ? `${operation} ejecutado correctamente.` : result.error?.message ?? 'La operación falló.')
-    return this.snapshot()
-  }
-
-  private invalidResult(message: string) {
-    return { ok: false as const, error: { message } }
-  }
-
-  private record(name: RepairActionName, ok: boolean, message: string): void {
-    this.actions.push({ id: this.actions.length + 1, name, ok, message })
-    this.message = message
-  }
-
-  private solvedChallengeIds(): string[] {
-    const names = this.actions.filter((action) => action.ok).map((action) => action.name)
-    const allNames = this.actions.map((action) => action.name)
-    const successfulIndex = (name: RepairActionName) => this.actions.findIndex((action) => action.name === name && action.ok)
-    const snapshot = this.session.snapshot()
-    const protectedFile = snapshot.engine.files.find((file) => file.id === 'protected')
-    const sequenceDescriptor = snapshot.engine.processes[0]?.openFiles.find((handle) => handle.fileId === 'sequence')
-    const reportSolved = Boolean(protectedFile && !protectedFile.attributes.readOnly && successfulIndex('set-readonly') < successfulIndex('open-protected') && successfulIndex('open-protected') < successfulIndex('write-protected') && snapshot.engine.files.find((file) => file.id === 'protected')?.content.every((byte, index) => byte === new TextEncoder().encode('REPARADO')[index]))
-    const descriptorSolved = allNames.includes('invalid-read') && successfulIndex('open-records') < successfulIndex('read-records')
-    const cursorSolved = successfulIndex('open-sequence') < successfulIndex('seek-sequence') && successfulIndex('seek-sequence') < successfulIndex('read-sequence') && sequenceDescriptor === undefined
-    const orderSolved = successfulIndex('open-protected') < successfulIndex('write-protected') && successfulIndex('write-protected') < successfulIndex('close-all') && snapshot.engine.processes.every((process) => process.openFiles.length === 0)
-    return [reportSolved && 'permissions', descriptorSolved && 'descriptor', cursorSolved && 'cursor', orderSolved && 'order'].filter((id): id is string => Boolean(id))
   }
 }
 

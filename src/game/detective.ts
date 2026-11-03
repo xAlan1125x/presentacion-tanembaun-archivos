@@ -47,9 +47,9 @@ export const DIGITAL_DETECTIVE_CASE: DetectiveCase = {
       kind: 'file',
       title: 'informe-final.txt',
       summary: 'El archivo visible para el equipo.',
-      content: 'CABECERA: RESCATE\\nREGISTROS: 01, 02',
-      bytes: '43 41 42 45 43 45 52 41 3A 20 52 45 53 43 41 54 45 0A 52 45 47 49 53 54 52 4F 53 3A 20 30 31 2C 20 30 32',
-      properties: ['regular', 'texto ASCII', '35 bytes'],
+      content: 'REGISTROS: 01, 02',
+      bytes: 'contenido incompleto',
+      properties: ['archivo regular', 'texto', 'faltan registros'],
       attributes: ['propietario: ana', 'modificado: 10:04:03', 'no bloqueado'],
       timestamp: '10:04:03',
       objective: 'El destino contiene sólo dos registros, aunque el origen tenía cuatro.',
@@ -60,9 +60,9 @@ export const DIGITAL_DETECTIVE_CASE: DetectiveCase = {
       kind: 'file',
       title: 'informe-origen.txt',
       summary: 'El archivo que debía copiarse.',
-      content: 'CABECERA: RESCATE\\nREGISTROS: 01, 02, 03, 04',
-      bytes: '43 41 42 45 43 45 52 41 3A 20 52 45 53 43 41 54 45 0A 52 45 47 49 53 54 52 4F 53 3A 20 30 31 2C 20 30 32 2C 20 30 33 2C 20 30 34',
-      properties: ['regular', 'texto ASCII', '43 bytes'],
+      content: 'REGISTROS: 01, 02, 03, 04',
+      bytes: 'contenido completo',
+      properties: ['archivo regular', 'texto', 'cuatro registros'],
       attributes: ['propietario: ana', 'modificado: 09:58:10', 'sólo lectura: no'],
       timestamp: '09:58:10',
       objective: 'El origen conserva los cuatro registros y es más grande que el destino.',
@@ -71,14 +71,14 @@ export const DIGITAL_DETECTIVE_CASE: DetectiveCase = {
     {
       id: 'backup',
       kind: 'file',
-      title: 'informe-final.bak',
-      summary: 'Una copia anterior con nombre parecido.',
-      content: 'CABECERA: RESCATE\\nREGISTROS: 01, 02, 03',
-      bytes: '43 41 42 45 43 45 52 41 3A 20 52 45 53 43 41 54 45 0A 52 45 47 49 53 54 52 4F 53 3A 20 30 31 2C 20 30 32 2C 20 30 33',
-      properties: ['regular', 'texto ASCII', '39 bytes'],
-      attributes: ['propietario: ana', 'oculto: sí', 'modificado: 08:20:00'],
-      timestamp: '08:20:00',
-      objective: 'Es una copia vieja; explica una pista engañosa, pero no el estado actual del destino.',
+      title: 'copia.bak',
+      summary: 'Una copia anterior del informe.',
+      content: 'REGISTROS: 01, 02, 03',
+      bytes: 'contenido anterior',
+      properties: ['archivo regular', 'texto', 'tres registros'],
+      attributes: ['propietario: ana', 'copia previa', 'no es el destino actual'],
+      timestamp: 'copia anterior',
+      objective: 'La copia anterior tiene tres registros: no es una copia completa del origen, que tiene cuatro.',
       relevant: false,
     },
     {
@@ -86,65 +86,37 @@ export const DIGITAL_DETECTIVE_CASE: DetectiveCase = {
       kind: 'event',
       title: 'creat("informe-final.txt")',
       summary: 'La llamada abrió el destino para escritura.',
-      content: 'El destino se truncó antes de recibir nuevos bytes. Descriptor devuelto: 4.',
-      bytes: 'operación de metadatos',
-      properties: ['operación: creat', 'modo: escritura', 'fd: 4'],
+      content: 'El destino se vació antes de recibir los datos nuevos.',
+      bytes: 'operación sobre el archivo',
+      properties: ['operación: creat', 'prepara el destino', 'puede truncarlo'],
       attributes: ['proceso: rescate', 'resultado: éxito'],
       timestamp: '10:03:58',
-      objective: 'creat crea o trunca y deja abierto el destino; no es equivalente a create.',
+      objective: 'creat crea el destino o lo deja vacío antes de la copia.',
       relevant: true,
-    },
-    {
-      id: 'partial-write',
-      kind: 'event',
-      title: 'write(fd=4, 43 bytes)',
-      summary: 'La escritura transfirió sólo el primer bloque.',
-      content: 'bytes solicitados: 43 · bytes transferidos: 35 · posición: 0 → 35',
-      bytes: '35 bytes transferidos',
-      properties: ['operación: write', 'solicitados: 43', 'transferidos: 35'],
-      attributes: ['proceso: rescate', 'resultado: éxito parcial del ciclo'],
-      timestamp: '10:04:03',
-      objective: 'La llamada escribió un bloque, pero el registro muestra que el ciclo no continuó con el resto del origen.',
-      relevant: true,
-    },
-    {
-      id: 'rename',
-      kind: 'event',
-      title: 'rename("informe-final.bak", "informe-final.txt")',
-      summary: 'Una acción de mantenimiento cambió un nombre.',
-      content: 'El identificador del archivo no cambia; sólo cambia el nombre visible.',
-      bytes: 'sin modificación de contenido',
-      properties: ['operación: rename', 'origen: informe-final.bak', 'destino: informe-final.txt'],
-      attributes: ['proceso: mantenimiento', 'resultado: éxito'],
-      timestamp: '10:05:10',
-      objective: 'Renombrar no transforma los bytes, pero este evento ocurrió después del diagnóstico y no explica el destino actual.',
-      relevant: false,
     },
   ],
   hypotheses: [
     {
       id: 'truncated-copy',
       label: 'Se truncó el destino y la copia quedó incompleta.',
-      explanation: 'La evidencia encaja con creat, que trunca el destino, seguida por una transferencia que no continuó con todo el origen. El contenido actual confirma que sólo llegaron dos registros.',
-      requiredEvidenceIds: ['report', 'source', 'creat', 'partial-write'],
+      explanation: 'El origen tenía cuatro registros, pero el destino conserva sólo dos. creat dejó el destino vacío antes de la copia y por eso el archivo quedó incompleto.',
+      requiredEvidenceIds: ['report', 'source', 'creat'],
     },
     {
       id: 'extension-corruption',
       label: 'La extensión .txt convirtió los datos en texto.',
-      explanation: 'Una extensión es un nombre o convención: cambiarla no reescribe los bytes. No explica que el destino tenga menos registros.',
-      requiredEvidenceIds: ['rename'],
+      explanation: 'La extensión sólo es parte del nombre. No explica que falten registros en el destino.',
+      requiredEvidenceIds: ['report'],
     },
     {
       id: 'old-backup',
       label: 'La copia .bak fue restaurada completa.',
-      explanation: 'La copia .bak es anterior y contiene tres registros, no los dos del destino ni los cuatro del origen. Es una pista engañosa.',
+      explanation: 'copia.bak tiene tres registros y el origen tiene cuatro, así que no es una copia completa. Además, el destino actual sólo conserva dos.',
       requiredEvidenceIds: ['backup'],
     },
   ],
   hints: [
-    { id: 'operation', text: 'Buscá una operación que pueda dejar el destino vacío antes de escribir.', penaltyPoints: 10 },
-    { id: 'comparison', text: 'Compará el tamaño y los registros del origen con los del destino.', penaltyPoints: 10 },
-    { id: 'name', text: 'El nombre no cambia los bytes: concentráte en la secuencia creat → write.', penaltyPoints: 10 },
+    { id: 'operation', text: 'Compará los registros: el origen tiene cuatro, el destino sólo dos. Buscá qué operación vacía el destino antes de copiar.', penaltyPoints: 5 },
   ],
 }
 
@@ -158,9 +130,18 @@ export interface DetectiveEvaluation extends GameEvaluation {
   selectedEvidenceIds: string[]
   relevantEvidenceIds: string[]
   missingEvidenceIds: string[]
+  contextualEvidenceIds: string[]
   misleadingEvidenceIds: string[]
+  evidenceExplanations: DetectiveEvidenceExplanation[]
   hypothesisCorrect: boolean
   revealedHintIds: string[]
+}
+
+export interface DetectiveEvidenceExplanation {
+  evidenceId: string
+  title: string
+  relevant: boolean
+  explanation: string
 }
 
 export function evaluateInvestigation(answers: DetectiveAnswers): DetectiveEvaluation {
@@ -169,7 +150,21 @@ export function evaluateInvestigation(answers: DetectiveAnswers): DetectiveEvalu
   const required = new Set(solution.requiredEvidenceIds)
   const relevantEvidenceIds = answers.selectedEvidenceIds.filter((id) => required.has(id))
   const missingEvidenceIds = solution.requiredEvidenceIds.filter((id) => !selected.has(id))
-  const misleadingEvidenceIds = answers.selectedEvidenceIds.filter((id) => !required.has(id))
+  const contextualEvidenceIds = answers.selectedEvidenceIds.filter((id) => {
+    const evidence = DIGITAL_DETECTIVE_CASE.evidence.find((item) => item.id === id)
+    return !required.has(id) && evidence?.relevant === false
+  })
+  const misleadingEvidenceIds = answers.selectedEvidenceIds.filter((id) => !required.has(id) && !contextualEvidenceIds.includes(id))
+  const evidenceExplanations = DIGITAL_DETECTIVE_CASE.evidence.map((evidence) => ({
+    evidenceId: evidence.id,
+    title: evidence.title,
+    relevant: required.has(evidence.id),
+    explanation: required.has(evidence.id)
+      ? `Es relevante: ${evidence.objective}`
+      : evidence.relevant === false
+        ? `Es contextual y opcional: ${evidence.objective} No es necesaria para la causa correcta.`
+        : `No es necesaria para la causa correcta: ${evidence.objective}`,
+  }))
   const hypothesisCorrect = answers.hypothesisId === solution.id
   const evidenceQuality = relevantEvidenceIds.length / solution.requiredEvidenceIds.length
   const hypothesisQuality = hypothesisCorrect ? 0.4 : 0
@@ -187,7 +182,9 @@ export function evaluateInvestigation(answers: DetectiveAnswers): DetectiveEvalu
     selectedEvidenceIds: answers.selectedEvidenceIds,
     relevantEvidenceIds,
     missingEvidenceIds,
+    contextualEvidenceIds,
     misleadingEvidenceIds,
+    evidenceExplanations,
     hypothesisCorrect,
     revealedHintIds,
   }

@@ -8,6 +8,7 @@ export interface OnlineSession {
   name: string
   joinCode: string
   status: SessionStatus
+  rulesVersion: number
   createdAt: string
   closedAt?: string
 }
@@ -15,6 +16,8 @@ export interface OnlineSession {
 export interface RankingEntry {
   position: number
   nickname: string
+  academicScore: number
+  factoryScore: number
   totalScore: number
 }
 
@@ -22,6 +25,8 @@ export interface SessionParticipantSummary {
   participantId: string
   nickname: string
   finishedAt?: string
+  academicScore: number
+  factoryScore: number
   totalScore: number
 }
 
@@ -39,4 +44,5 @@ export interface ParticipantProgressRow {
 export interface OnlineJoinResult {
   session: OnlineSession
   participantId: string
+  rulesVersion: number
 }

@@ -27,9 +27,9 @@ export interface CopyChallengeSnapshot {
 }
 
 export const COPYFILE_HINTS = [
-  { id: 'buffer', text: 'Después de read, usá sólo los bytes válidos del búfer.', penaltyPoints: 10 },
-  { id: 'partial', text: 'Si write transfiere menos, repetí write con los bytes pendientes.', penaltyPoints: 10 },
-  { id: 'eof', text: 'EOF exitoso con 0 bytes termina el ciclo; no es un error.', penaltyPoints: 10 },
+  { id: 'buffer', text: 'Después de read, usá sólo los bytes válidos del búfer.', penaltyPoints: 5 },
+  { id: 'partial', text: 'Si write transfiere menos, repetí write con los bytes pendientes.', penaltyPoints: 5 },
+  { id: 'eof', text: 'EOF exitoso con 0 bytes termina el ciclo; no es un error.', penaltyPoints: 5 },
 ]
 
 export interface CopyChallengeEvaluation extends GameEvaluation {

@@ -1,15 +1,21 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   createInitialState,
+  EscapeRoomGame as EscapeRoomSession,
   notifyPhase5ProgressUpdated,
-  ESCAPE_ROOM_HINTS,
-  EscapeRoomGame as EscapeRoomEngine,
-  resetGameProgress,
   saveEscapeRoomEvaluation,
+  type ChaosFileId,
+  type ChaosProcessId,
   type EscapeRoomSnapshot,
   type Phase5State,
 } from '../../game'
 import { createActiveGameStore, saveActiveGameState } from '../../supabase'
+
+const STATUS_LABELS = {
+  idle: 'Sin solicitud disponible', ready: 'Listo para asignar', waiting: 'Esperando archivo',
+  running: 'Operación en curso', release: 'Listo para liberar',
+} as const
+const OPERATION_LABELS = { read: 'lectura', write: 'escritura' } as const
 
 function initialState(): Phase5State {
   if (typeof window === 'undefined') return createInitialState('local-player')
@@ -18,72 +24,99 @@ function initialState(): Phase5State {
 }
 
 export function EscapeRoomGame() {
-  const engineRef = useRef<EscapeRoomEngine | null>(null)
-  if (!engineRef.current) engineRef.current = new EscapeRoomEngine()
-  const [snapshot, setSnapshot] = useState<EscapeRoomSnapshot>(() => engineRef.current!.snapshot())
+  const sessionRef = useRef(new EscapeRoomSession())
+  const savedAttemptRef = useRef(false)
+  const [snapshot, setSnapshot] = useState<EscapeRoomSnapshot>(() => sessionRef.current.snapshot())
   const [phaseState, setPhaseState] = useState(initialState)
-  const [message, setMessage] = useState('')
+  const phaseStateRef = useRef(phaseState)
+  const [selectedProcess, setSelectedProcess] = useState<ChaosProcessId>()
+  const [replaying, setReplaying] = useState(false)
+  const [started, setStarted] = useState(false)
+  const [persistenceMessage, setPersistenceMessage] = useState('')
+  const storedProgress = phaseState.games['escape-room']
+  const showStoredResult = storedProgress.status === 'completed' && !replaying && !snapshot.finished
+
+  useEffect(() => { phaseStateRef.current = phaseState }, [phaseState])
   useEffect(() => {
-    const refresh = () => { const loaded = createActiveGameStore().load(); if (loaded.ok && loaded.value) setPhaseState(loaded.value) }
+    const refresh = () => {
+      const loaded = createActiveGameStore().load()
+      if (loaded.ok && loaded.value) setPhaseState(loaded.value)
+    }
     window.addEventListener('filelab:online-progress-updated', refresh)
     return () => window.removeEventListener('filelab:online-progress-updated', refresh)
   }, [])
-  const run = (action: (engine: EscapeRoomEngine) => EscapeRoomSnapshot) => setSnapshot(action(engineRef.current!))
-  const submit = () => {
-    const evaluation = engineRef.current!.evaluate()
-    const next = saveEscapeRoomEvaluation(phaseState, evaluation)
-    setPhaseState(next)
-    const saved = saveActiveGameState(next)
+
+  useEffect(() => {
+    if (!started || snapshot.finished || showStoredResult) return undefined
+    const timer = window.setInterval(() => {
+      const next = sessionRef.current.tick()
+      setSnapshot(next)
+      if (next.finished) persistResult()
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [started, snapshot.finished, showStoredResult])
+
+  function persistResult() {
+    if (savedAttemptRef.current) return
+    savedAttemptRef.current = true
+    const evaluation = sessionRef.current.evaluate()
+    const updated = saveEscapeRoomEvaluation(phaseStateRef.current, evaluation)
+    phaseStateRef.current = updated
+    setPhaseState(updated)
+    setReplaying(false)
+    const saved = saveActiveGameState(updated)
     notifyPhase5ProgressUpdated()
-    setMessage(saved && !saved.ok ? saved.error : `Resultado guardado: ${evaluation.score}/200.`)
-    setSnapshot(engineRef.current!.snapshot())
+    setPersistenceMessage(saved.ok ? 'Resultado guardado automáticamente.' : saved.error)
   }
-  const reset = () => {
-    const next = resetGameProgress(phaseState, 'escape-room')
-    engineRef.current = new EscapeRoomEngine()
-    setPhaseState(next)
-    setSnapshot(engineRef.current.snapshot())
-    const saved = saveActiveGameState(next)
-    notifyPhase5ProgressUpdated()
-    setMessage(saved && !saved.ok ? saved.error : 'Escape Room reiniciado. Las otras etapas no se modificaron.')
+
+  function apply(action: () => EscapeRoomSnapshot) {
+    const next = action()
+    setSnapshot(next)
+    if (next.finished) persistResult()
   }
-  const files = snapshot.lab.engine.files
-  const handles = snapshot.lab.engine.processes.flatMap((process) => process.openFiles.map((handle) => `${handle.descriptor} · ${handle.fileId} · pos ${handle.position}`))
-  const currentStep = snapshot.steps.find((step) => !step.solved)
+
+  function assignFile(fileId: ChaosFileId) {
+    if (!selectedProcess) return
+    apply(() => sessionRef.current.assign(selectedProcess, fileId))
+    setSelectedProcess(undefined)
+  }
+
+  function restart() {
+    sessionRef.current = new EscapeRoomSession()
+    savedAttemptRef.current = false
+    setSnapshot(sessionRef.current.snapshot())
+    setSelectedProcess(undefined)
+    setReplaying(true)
+    setStarted(false)
+    setPersistenceMessage('Nuevo intento iniciado. Tu mejor puntuación se conserva.')
+  }
+
+  if (showStoredResult) return <div className="escape-room-game chaos-game"><section className="chaos-result"><span className="eyebrow">Misión registrada</span><h2>Caos en el sistema de archivos</h2><strong>{storedProgress.bestScore}/200 puntos</strong><p>Tu mejor resultado está guardado. Podés repetir el desafío para mejorarlo.</p><button type="button" className="primary-action" onClick={restart}>Jugar de nuevo</button></section></div>
+
+  if (snapshot.finished) return <div className="escape-room-game chaos-game"><section className="chaos-result"><span className="eyebrow">Tiempo finalizado</span><h2>Caos bajo control</h2><strong>{snapshot.score}/200 puntos</strong><p>Completaste {snapshot.completedCount} de {snapshot.totalRequests} solicitudes. Mejor resultado: {phaseState.games['escape-room'].bestScore}.</p><button type="button" className="primary-action" onClick={restart}>Intentar otra vez</button>{persistenceMessage && <p role="status">{persistenceMessage}</p>}</section></div>
+
+  if (!started) return <div className="escape-room-game chaos-game"><section className="chaos-result"><span className="eyebrow">Operación Rescate · etapa 5</span><h2>Caos en el sistema de archivos</h2><p>Tendrás 90 segundos: elegí un proceso, asignale el archivo que solicita y cerralo cuando termine para liberarlo. La exclusividad es una regla didáctica de este juego, no una propiedad universal.</p><button type="button" className="primary-action" onClick={() => setStarted(true)}>Comenzar desafío</button></section></div>
 
   return (
-    <div className="escape-room-game">
-      <div className="escape-room__intro">
-        <div><span className="eyebrow">Operación Rescate · 5.6</span><h2>Escape Room: Cámara de recuperación</h2><p>La información crítica quedó encerrada en un sistema ficticio. Observá evidencias, repará el acceso, recuperá los bytes y salí dejando el sistema limpio.</p></div>
-        <div className="escape-room-score"><span>Mejor resultado</span><strong>{phaseState.games['escape-room'].bestScore}<small>/200</small></strong><small>{phaseState.games['escape-room'].attempts} intento(s)</small></div>
+    <div className="escape-room-game chaos-game">
+      <header className="chaos-header">
+        <div><span className="eyebrow">Operación Rescate · etapa 5</span><h2>Caos en el sistema de archivos</h2><p>Elegí un proceso, asignale el archivo solicitado y liberalo cuando termine. Cada archivo admite un proceso a la vez sólo como regla didáctica del juego; no es una propiedad universal de los sistemas operativos.</p></div>
+        <div className="chaos-stats" aria-label="Estado de la partida"><strong>{snapshot.remainingSeconds}s</strong><span>{snapshot.completedCount}/{snapshot.totalRequests} completadas</span><span>{snapshot.score}/200 puntos</span></div>
+      </header>
+      <div className="chaos-progress" aria-hidden="true"><span style={{ width: `${(snapshot.completedCount / snapshot.totalRequests) * 100}%` }} /></div>
+      <p className="chaos-feedback" role="status" aria-live="polite">{snapshot.message}</p>
+      <div className="chaos-board">
+        <div className="chaos-processes" aria-label="Procesos simulados">
+          {snapshot.processes.map((process) => {
+            const selectable = process.status === 'ready' || process.status === 'waiting'
+            return <button type="button" key={process.id} className={'chaos-process ' + (selectedProcess === process.id ? 'is-selected' : '')} onClick={() => selectable && setSelectedProcess(process.id)} disabled={!selectable} aria-pressed={selectedProcess === process.id}><span className="chaos-process-icon" aria-hidden="true">●</span><strong>{process.name}</strong><span>{STATUS_LABELS[process.status]}</span>{process.request && process.request.availableAt <= snapshot.elapsedSeconds ? <small>Necesita {process.request.fileId} para {OPERATION_LABELS[process.request.operation]}</small> : <small>Próxima solicitud en espera</small>}</button>
+          })}
+        </div>
+        <div className="chaos-files" aria-label="Archivos compartidos">
+          {snapshot.files.map((file) => <article key={file.id} className={'chaos-file ' + (file.holder ? 'is-busy' : '')}><span className="chaos-file-icon" aria-hidden="true">▤</span><h3>{file.id}</h3><p>{file.label}</p>{file.holder ? <><span className="chaos-file-state">{file.readyToRelease ? 'Operación terminada' : 'En uso por ' + file.holder.toUpperCase() + ' · ' + file.remainingSeconds + 's'}</span><button type="button" className="primary-action" disabled={!file.readyToRelease} onClick={() => apply(() => sessionRef.current.release(file.id))}>{file.readyToRelease ? 'Cerrar y liberar' : 'Procesando…'}</button></> : <><span className="chaos-file-state">Disponible</span><button type="button" className="primary-action" disabled={!selectedProcess} onClick={() => assignFile(file.id)}>{selectedProcess ? 'Asignar a ' + selectedProcess.toUpperCase() : 'Elegí un proceso'}</button></>}</article>)}
+        </div>
       </div>
-      <div className="escape-room-mission"><span>Objetivo actual</span><strong>{currentStep?.title ?? 'Misión completada'}</strong><p>{currentStep?.description ?? 'La evidencia fue recuperada y verificada. Podés revisar la traza antes de volver a jugar.'}</p></div>
-      <div className="escape-room-progress">{snapshot.steps.map((step, index) => <article key={step.id} className={`${step.solved ? 'is-solved' : ''} ${step.unlocked ? 'is-unlocked' : 'is-locked'}`}><b>{index + 1}</b><span>{step.title}</span><small>{step.solved ? 'resuelto' : step.unlocked ? 'disponible' : 'bloqueado'}</small></article>)}</div>
-      <div className="escape-room-layout">
-        <section className="escape-room-explorer" aria-labelledby="escape-room-explorer-title">
-          <header><span>Explorador de evidencias</span><strong id="escape-room-explorer-title">Cámara de rescate</strong></header>
-          <div className="escape-room-files">{files.map((file) => <article key={file.id} className={snapshot.selectedFileId === file.id ? 'is-selected' : ''}><div><strong>{file.name}</strong><small>{file.type} · {file.format} · {file.size} B</small></div><div><button type="button" onClick={() => run((engine) => engine.inspect(file.id))}>Inspeccionar</button><button type="button" onClick={() => run((engine) => engine.selectFile(file.id))} disabled={!snapshot.steps[0].unlocked}>Seleccionar</button></div></article>)}</div>
-        </section>
-        <section className="escape-room-tools" aria-labelledby="escape-room-tools-title">
-          <header><span>Herramientas desbloqueables</span><strong id="escape-room-tools-title">Intervención sobre el sistema</strong></header>
-          <div className="escape-room-tool-buttons">
-            <button type="button" onClick={() => run((engine) => engine.setAccess())} disabled={!snapshot.steps[1].unlocked}>Comprobar acceso de lectura</button>
-            <button type="button" onClick={() => run((engine) => engine.openArchive())} disabled={!snapshot.steps[2].unlocked}>open evidencia</button>
-            <button type="button" onClick={() => run((engine) => engine.seek(7))} disabled={!snapshot.steps[2].unlocked}>seek cursor</button>
-            <button type="button" onClick={() => run((engine) => engine.readSecret())} disabled={!snapshot.steps[2].unlocked}>read bloque</button>
-            <button type="button" onClick={() => run((engine) => engine.prepareRecovery())} disabled={!snapshot.steps[3].unlocked}>creat recuperación</button>
-            <button type="button" onClick={() => run((engine) => engine.writeRecovery())} disabled={!snapshot.steps[3].unlocked}>write bytes</button>
-            <button type="button" onClick={() => run((engine) => engine.verify())} disabled={!snapshot.steps[4].unlocked}>Verificar contenido</button>
-            <button type="button" onClick={() => run((engine) => engine.closeAll())}>Cerrar descriptores</button>
-          </div>
-          <p className="escape-room-status" role="status">{snapshot.message}</p>
-        </section>
-      </div>
-      <div className="escape-room-observer"><div><span>Cursor / descriptores</span><strong>{handles.length ? handles.join(' · ') : 'ninguno abierto'}</strong></div><div><span>Búfer recuperado</span><strong>{snapshot.pendingBytes.length ? new TextDecoder().decode(snapshot.pendingBytes) : 'vacío'}</strong></div><div><span>Destino</span><strong>{files.find((file) => file.id === 'recovery')?.size ?? 0} B</strong></div></div>
-      <section className="escape-room-trace" aria-labelledby="escape-room-trace-title"><header><span>Registro de consecuencias</span><strong id="escape-room-trace-title">{snapshot.actions.length} acción(es)</strong></header><div>{snapshot.actions.slice().reverse().map((action) => <article key={action.id} className={action.ok ? 'is-ok' : 'is-error'}><b>{action.id}</b><code>{action.name}</code><p>{action.message}</p></article>)}</div></section>
-      <div className="escape-room-hints"><span>Pistas opcionales</span>{ESCAPE_ROOM_HINTS.map((hint) => <button type="button" key={hint.id} onClick={() => run((engine) => engine.useHint(hint.id))} disabled={snapshot.hintsUsed.includes(hint.id)}>{snapshot.hintsUsed.includes(hint.id) ? hint.text : `Pedir pista (-${hint.penaltyPoints})`}</button>)}</div>
-      <div className="escape-room-actions"><button type="button" className="primary-action" onClick={submit}>Evaluar misión <span aria-hidden="true">→</span></button><button type="button" className="filelab-secondary-button" onClick={reset}>Reiniciar Escape Room</button><span>{snapshot.completed ? 'Misión completa' : 'La cámara sigue bloqueada'}</span></div>
-      {message && <p className="escape-room-persistence" role="status">{message}</p>}
+      {persistenceMessage && <p className="chaos-persistence" role="status">{persistenceMessage}</p>}
     </div>
   )
 }

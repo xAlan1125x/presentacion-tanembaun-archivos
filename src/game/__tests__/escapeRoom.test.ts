@@ -1,82 +1,74 @@
 import { describe, expect, it } from 'vitest'
-import {
-  createInitialState,
-  EscapeRoomGame,
-  saveEscapeRoomEvaluation,
-} from '..'
+import { CHAOS_REQUESTS, EscapeRoomGame, saveEscapeRoomEvaluation } from '../escapeRoom'
+import { createInitialState, recordEvaluation, totalScore } from '../rules'
 
-function completeMission(game: EscapeRoomGame) {
-  game.selectFile('archive')
-  game.setAccess()
-  game.openArchive()
-  game.seek(7)
-  game.readSecret()
-  game.prepareRecovery()
-  game.writeRecovery()
-  game.verify()
-  game.closeAll()
-}
-
-describe('EscapeRoomGame', () => {
-  it('unlocks the five connected steps only after effective actions', () => {
-    const game = new EscapeRoomGame()
-    expect(game.snapshot().steps.map((step) => step.unlocked)).toEqual([true, false, false, false, false])
-    game.selectFile('decoy')
-    expect(game.snapshot().selectedFileId).toBeUndefined()
-    game.selectFile('archive')
-    expect(game.snapshot().steps[1].solved).toBe(false)
-    game.setAccess()
-    expect(game.snapshot().steps[1].solved).toBe(true)
-    expect(game.snapshot().lab.engine.files.find((file) => file.id === 'archive')?.attributes.readOnly).toBe(true)
-    game.openArchive()
-    game.seek(7)
-    game.readSecret()
-    expect(game.snapshot().pendingBytes.length).toBe(8)
-    expect(game.snapshot().steps[3].unlocked).toBe(true)
+describe('Caos en el sistema de archivos', () => {
+  it('presenta tres procesos, dos archivos y 90 segundos', () => {
+    const snapshot = new EscapeRoomGame().snapshot()
+    expect(snapshot.processes).toHaveLength(3)
+    expect(snapshot.files).toHaveLength(2)
+    expect(snapshot.remainingSeconds).toBe(90)
+    expect(snapshot.totalRequests).toBe(9)
   })
 
-  it('rejects invalid access and cursor operations without corrupting the mission', () => {
+  it('asigna, espera y libera un archivo exclusivo', () => {
     const game = new EscapeRoomGame()
-    expect(game.setAccess().message).toContain('Seleccioná')
-    game.selectFile('archive')
-    expect(game.seek(7).message).toContain('Abrí')
-    game.setAccess()
-    game.openArchive()
-    expect(game.seek(20).message).toContain('intervalo')
-    expect(game.snapshot().pendingBytes.length).toBe(0)
+    game.assign('p1', 'informe.dat')
+    game.tick(5)
+    let snapshot = game.snapshot()
+    expect(snapshot.processes.find((process) => process.id === 'p3')?.status).toBe('waiting')
+    expect(snapshot.files.find((file) => file.id === 'informe.dat')?.readyToRelease).toBe(true)
+
+    game.release('informe.dat')
+    snapshot = game.snapshot()
+    expect(snapshot.completedCount).toBe(1)
+    expect(snapshot.processes.find((process) => process.id === 'p3')?.status).toBe('ready')
   })
 
-  it('recovers the exact bytes and requires closing descriptors', () => {
+  it('penaliza asignaciones incorrectas y liberaciones prematuras', () => {
     const game = new EscapeRoomGame()
-    completeMission(game)
-    const evaluation = game.evaluate()
-    expect(evaluation.completed).toBe(true)
-    expect(evaluation.score).toBe(200)
-    expect(evaluation.bytesRecovered).toBe(true)
-    expect(evaluation.descriptorsClosed).toBe(true)
-    expect(evaluation.solvedStepIds).toHaveLength(5)
+    game.assign('p1', 'registro.log')
+    game.assign('p1', 'informe.dat')
+    const snapshot = game.release('informe.dat')
+    expect(snapshot.failedActionCount).toBe(2)
+    expect(snapshot.penalties).toBe(10)
+    expect(snapshot.score).toBe(0)
   })
 
-  it('applies hint penalties and preserves the best result through phase contracts', () => {
+  it('completa todas las solicitudes con un máximo de 200 puntos', () => {
     const game = new EscapeRoomGame()
-    game.useHint('seek')
-    completeMission(game)
-    const evaluation = game.evaluate()
-    expect(evaluation.score).toBe(190)
-    const state = saveEscapeRoomEvaluation(createInitialState('player'), evaluation, '2026-11-01T20:00:00.000Z')
-    expect(state.games['escape-room'].bestScore).toBe(190)
-    expect(state.games['escape-room'].attempts).toBe(1)
+    for (const request of CHAOS_REQUESTS) {
+      const now = game.snapshot().elapsedSeconds
+      if (request.availableAt > now) game.tick(request.availableAt - now)
+      game.assign(request.processId, request.fileId)
+      game.tick(request.duration)
+      game.release(request.fileId)
+    }
+    const snapshot = game.snapshot()
+    expect(snapshot.finished).toBe(true)
+    expect(snapshot.completedCount).toBe(9)
+    expect(snapshot.score).toBe(200)
   })
 
-  it('restores only the Escape Room scenario', () => {
+  it('finaliza al vencer el tiempo y reinicia sin conservar el intento', () => {
     const game = new EscapeRoomGame()
-    completeMission(game)
+    expect(game.tick(90).finished).toBe(true)
     const restored = game.restore()
-    expect(restored.selectedFileId).toBeUndefined()
-    expect(restored.pendingBytes.length).toBe(0)
-    expect(restored.actions).toHaveLength(0)
-    expect(restored.lab.engine.files.find((file) => file.id === 'recovery')?.size).toBe(9)
-    expect(restored.steps[0].unlocked).toBe(true)
-    expect(restored.steps[1].unlocked).toBe(false)
+    expect(restored.finished).toBe(false)
+    expect(restored.remainingSeconds).toBe(90)
+    expect(restored.completedCount).toBe(0)
+  })
+
+  it('registra un intento una sola vez y conserva la mejor puntuación', () => {
+    const game = new EscapeRoomGame()
+    game.tick(90)
+    const unlocked = (['classify-files', 'digital-detective', 'repair-system', 'copyfile-challenge'] as const).reduce(
+      (state, gameId) => recordEvaluation(state, gameId, { score: 100, completed: true, explanation: 'Lista.' }),
+      createInitialState('test-player'),
+    )
+    const once = saveEscapeRoomEvaluation(unlocked, game.evaluate())
+    expect(once.games['escape-room']?.attempts).toBe(1)
+    expect(once.games['escape-room']?.bestScore).toBe(0)
+    expect(totalScore(once)).toBe(400)
   })
 })

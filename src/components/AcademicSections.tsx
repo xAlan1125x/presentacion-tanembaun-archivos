@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { Fragment, useState, type ReactNode } from 'react'
 import { AccessDemo, AttributesDemo, CopyfileDemo, NamingDemo, OperationsDemo, StructureDemo, TypesDemo } from './demos/AcademicDemos'
 
 function SectionHeader({ id, eyebrow, title, description }: { id: string; eyebrow: string; title: string; description: string }) {
@@ -8,6 +8,47 @@ function SectionHeader({ id, eyebrow, title, description }: { id: string; eyebro
 function Activity({ label, prompt, answer, children }: { label: string; prompt: string; answer: string; children?: ReactNode }) {
   const [revealed,setRevealed]=useState(false)
   return <aside className={`micro-activity ${revealed?'is-revealed':''}`}><div><span>{label}</span><p>{prompt}</p>{children}</div><button type="button" aria-expanded={revealed} onClick={()=>setRevealed((value)=>!value)}>{revealed?'Ocultar resolución':'Ver resolución'}</button>{revealed&&<div className="activity-answer"><strong>Resolución</strong><p>{answer}</p></div>}</aside>
+}
+
+const fileAttributes = [
+  { category: 'Protección', rows: [
+    ['Protección', 'Quién puede acceso al archivo y en qué forma'],
+    ['Contraseña', 'Contraseña necesaria para acceder al archivo'],
+    ['Creador', 'ID de la persona que creó el archivo'],
+    ['Propietario', 'El propietario actual'],
+  ]},
+  { category: 'Banderas', rows: [
+    ['Bandera de sólo lectura', '0 para lectura/escritura; 1 para sólo lectura'],
+    ['Bandera oculto', '0 para normal; 1 para que no aparezca en los listados'],
+    ['Bandera del sistema', '0 para archivos normales; 1 para archivo del sistema'],
+    ['Bandera de archivo', '0 si ha sido respaldado; 1 si necesita respaldarse'],
+    ['Bandera ASCII/binario', '0 para archivo ASCII; 1 para archivo binario'],
+    ['Bandera de acceso aleatorio', '0 para sólo acceso secuencial; 1 para acceso aleatorio'],
+    ['Bandera temporal', '0 para normal; 1 para eliminar archivo al salir del proceso'],
+    ['Banderas de bloqueo', '0 para desbloqueado; distinto de cero para bloqueado'],
+  ]},
+  { category: 'Registros y llaves', rows: [
+    ['Longitud de registro', 'Número de bytes en un registro'],
+    ['Posición de la llave', 'Desplazamiento de la llave dentro de cada registro'],
+    ['Longitud de la llave', 'Número de bytes en el campo llave'],
+  ]},
+  { category: 'Tiempos', rows: [
+    ['Hora de creación', 'Fecha y hora en que se creó el archivo'],
+    ['Hora del último acceso', 'Fecha y hora en que se accedió al archivo por última vez'],
+    ['Hora de la última modificación', 'Fecha y hora en que se modificó por última vez el archivo'],
+  ]},
+  { category: 'Tamaños', rows: [
+    ['Tamaño actual', 'Número de bytes en el archivo'],
+    ['Tamaño máximo', 'Número de bytes hasta donde puede crecer el archivo'],
+  ]},
+] as const
+
+function FileAttributesTable() {
+  const [expanded, setExpanded] = useState(false)
+  return <div className="file-attributes-table">
+    <button className="file-attributes-toggle" type="button" aria-expanded={expanded} aria-controls="file-attributes-list" onClick={() => setExpanded((value) => !value)}>{expanded ? 'Ocultar atributos' : 'Ver todos los atributos'}</button>
+    {expanded && <div id="file-attributes-list" className="file-attributes-list"><table><caption>Figura 4-4 · Algunos posibles atributos de archivos</caption><thead><tr><th scope="col">Atributo</th><th scope="col">Significado</th></tr></thead><tbody>{fileAttributes.map((group) => <Fragment key={group.category}><tr className="file-attributes-category"><th scope="colgroup" colSpan={2}>{group.category}</th></tr>{group.rows.map(([name, meaning]) => <tr key={name}><th scope="row">{name}</th><td>{meaning}</td></tr>)}</Fragment>)}</tbody></table></div>}
+  </div>
 }
 
 function Essential({ children }: { children: ReactNode }) { return <div className="essential-idea"><span>Idea esencial</span><p>{children}</p></div> }
@@ -38,6 +79,26 @@ export function TypesSection() {
   return <section id="tipos" className="presentation-section types-section academic-section" aria-labelledby="tipos-title">
     <SectionHeader id="tipos-title" eyebrow="4.1.3 · Tipos" title="No todos los archivos se usan de la misma manera" description="El tipo permite distinguir información ordinaria de directorios o dispositivos, mientras el formato indica cómo interpretar el contenido regular." />
     <div className="type-taxonomy academic-taxonomy"><div className="taxonomy-root">Archivos</div><div className="taxonomy-branches"><article><span>Regulares</span><strong>Texto ASCII</strong><small>Líneas y caracteres legibles</small><strong>Binarios</strong><small>Estructura interna conocida por el programa</small></article><article><span>Directorios</span><p>Organizan y permiten localizar otros archivos. Se desarrollarán fuera del 4.1 asignado.</p></article><article><span>Especiales · UNIX</span><strong>Caracteres</strong><small>Flujo de E/S, como terminales</small><strong>Bloques</strong><small>Dispositivos de almacenamiento</small></article></div></div>
+    <figure className="executable-figure">
+      <div className="binary-structures" role="img" aria-label="Figura 4-3: estructura interna de un archivo ejecutable y de un archivo compuesto por módulos objeto">
+        <div className="binary-structure binary-structure--executable">
+          <div className="binary-block binary-block--header"><strong>Encabezado</strong><small>Número mágico · tamaño del texto · tamaño de los datos · tamaño del BSS · tamaño de la tabla de símbolos · punto de entrada</small><span>Banderas</span></div>
+          <div className="binary-block binary-block--text">Texto</div>
+          <div className="binary-block binary-block--data">Datos</div>
+          <div className="binary-block binary-block--relocation">Bits de reubicación</div>
+          <div className="binary-block binary-block--symbols">Tabla de símbolos</div>
+          <b className="binary-figure-label">(a) Archivo ejecutable</b>
+        </div>
+        <div className="binary-structure binary-structure--modules">
+          <div className="binary-block binary-block--header">Encabezado</div><div className="binary-block binary-block--object">Módulo objeto</div>
+          <div className="binary-block binary-block--header">Encabezado</div><div className="binary-block binary-block--object">Módulo objeto</div>
+          <div className="binary-block binary-block--header">Encabezado</div><div className="binary-block binary-block--object">Módulo objeto</div>
+          <b className="binary-figure-label">(b) Archivo</b>
+        </div>
+        <div className="binary-module-detail"><strong>Nombre del módulo</strong><span>Datos</span><span>Propietario</span><span>Protección</span><span>Tamaño</span></div>
+      </div>
+      <figcaption>Figura 4-3. Dos formas de organizar archivos binarios: un ejecutable con encabezado y áreas de carga, y un archivo compuesto por módulos objeto.</figcaption>
+    </figure>
     <div className="policy-mechanism"><div><span>Política</span><p>¿Qué tipos reconoce o exige el sistema?</p></div><div><span>Mecanismo</span><p>¿Cómo representa y abre cada clase?</p></div><strong>La clasificación concreta varía entre sistemas operativos.</strong></div>
     <Activity label="Detective digital" prompt="Un archivo se llama foto.txt y comienza con bytes FF D8 FF. ¿Confiarías sólo en la extensión?" answer="No. La extensión puede orientar, pero los bytes y la estructura interna aportan evidencia del formato. Cambiar el nombre no reescribe el contenido." />
     <TypesDemo />
@@ -60,6 +121,7 @@ export function AttributesSection() {
   return <section id="atributos" className="presentation-section attributes-section section-ink academic-section" aria-labelledby="atributos-title">
     <SectionHeader id="atributos-title" eyebrow="4.1.5 · Atributos" title="El archivo también conserva datos sobre sí mismo" description="Además de nombre y contenido, el sistema asocia metadatos para describirlo, protegerlo y administrarlo." />
     <div className="attribute-spectrum"><article><span>Identidad</span><strong>Creador · propietario</strong><p>Relacionan el archivo con usuarios o procesos.</p></article><article><span>Protección</span><strong>Acceso · contraseñas</strong><p>Indican quién puede usarlo y de qué manera, según el sistema.</p></article><article><span>Estado</span><strong>Banderas</strong><p>Sólo lectura, oculto, sistema, archivo, temporal o bloqueo son ejemplos; no todos existen en todos los sistemas.</p></article><article><span>Descripción</span><strong>Tiempos · tamaño · registros</strong><p>Fechas, longitud actual o máxima y campos estructurales apoyan la administración.</p></article></div>
+    <FileAttributesTable />
     <Activity label="Diagnóstico" prompt="El propietario abre un archivo, pero la escritura falla. ¿Alcanza con mirar el contenido?" answer="No. Hay que consultar los atributos: una bandera de sólo lectura, un bloqueo, la protección o un límite de tamaño pueden impedir la operación sin cambiar los bytes existentes." />
     <AttributesDemo />
     <Essential>Los atributos son metadatos. Su conjunto y significado dependen del sistema; FileLab usa un modelo didáctico explícito y limitado.</Essential>

@@ -44,7 +44,6 @@ export function PropertiesInspector({ file, onApply }: PropertiesInspectorProps)
         </div>
       </ExpandablePanel>
       <ExpandablePanel title="Protección" hint="FileLab didactic v1">
-        <p className="filelab-model-note">Representación educativa propia; no equivale a permisos POSIX, ACL ni a un sistema específico.</p>
         <table className="permission-table"><thead><tr><th>Principal</th><th>Leer</th><th>Escribir</th></tr></thead><tbody>
           {(['owner','others'] as const).map((group) => <tr key={group}><th>{group === 'owner' ? 'Propietario' : 'Otros'}</th>{(['read','write'] as const).map((permission) => <td key={permission}><input aria-label={`${group} ${permission}`} type="checkbox" checked={Boolean(draft.protection?.[group]?.[permission])} onChange={(event) => setPermission(group, permission, event.target.checked)} /></td>)}</tr>)}
         </tbody></table>

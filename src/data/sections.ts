@@ -21,6 +21,6 @@ export const presentationSections: PresentationSection[] = [
   { id: 'detective-digital', eyebrow: 'Fase 5.3', shortTitle: 'Detective digital', title: 'Investigación de evidencias' },
   { id: 'reparar-sistema', eyebrow: 'Fase 5.4', shortTitle: 'Repará el sistema', title: 'Laboratorio de reparación' },
   { id: 'copyfile-challenge', eyebrow: 'Fase 5.5', shortTitle: 'Copyfile Challenge', title: 'Copia bloque por bloque' },
-  { id: 'escape-room', eyebrow: 'Fase 5.6', shortTitle: 'Escape Room', title: 'Misión final de rescate' },
+  { id: 'filelab-factory', eyebrow: 'Etapa 5', shortTitle: 'FileLab Factory', title: 'Gestión de pedidos y operaciones' },
   { id: 'sintesis', eyebrow: 'Cierre', shortTitle: 'Síntesis', title: 'Siete ideas, un mismo archivo' },
 ]

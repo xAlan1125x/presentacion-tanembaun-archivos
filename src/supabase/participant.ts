@@ -1,17 +1,16 @@
 import {
   createInitialState,
   createLocalGameStore,
-  GAME_IDS,
+  finalizeLocalParticipation,
   type GameProgressStore,
   type Phase5State,
   type PersistenceResult,
 } from '../game'
-import { getCurrentUser, loadParticipantProgress, updateParticipantProgress } from './service'
+import { finalizeParticipant, getCurrentUser, loadParticipantRunState, saveParticipantRunState } from './service'
 import { supabase } from './client'
-import type { ParticipantProgressRow } from './types'
 
 const PARTICIPANT_KEY = 'filelab:phase6:participant:v1'
-const ONLINE_STATE_PREFIX = 'filelab:phase6:progress:'
+const ONLINE_STATE_PREFIX = 'filelab:phase6:progress:v3:'
 export const ONLINE_PROGRESS_EVENT = 'filelab:online-progress-updated'
 
 export interface OnlineParticipant {
@@ -19,6 +18,7 @@ export interface OnlineParticipant {
   sessionId: string
   joinCode: string
   nickname: string
+  rulesVersion: number
   finishedAt?: string
 }
 
@@ -29,7 +29,7 @@ function readParticipant(storage: Storage): OnlineParticipant | null {
     const value = JSON.parse(raw) as Partial<OnlineParticipant>
     return typeof value.participantId === 'string' && typeof value.sessionId === 'string' &&
       typeof value.joinCode === 'string' && typeof value.nickname === 'string'
-      ? value as OnlineParticipant
+      ? { ...value, rulesVersion: typeof value.rulesVersion === 'number' ? value.rulesVersion : 1 } as OnlineParticipant
       : null
   } catch {
     return null
@@ -72,31 +72,28 @@ export function loadOnlineState(participant: OnlineParticipant): Phase5State | n
   return loaded.ok && loaded.value ? loaded.value : null
 }
 
-function mergeProgress(state: Phase5State, rows: ParticipantProgressRow[]): Phase5State {
-  const games = { ...state.games }
-  for (const row of rows) {
-    if (!GAME_IDS.includes(row.gameId)) continue
-    const current = games[row.gameId]
-    games[row.gameId] = {
-      status: current.status === 'completed' || row.status === 'completed' ? 'completed' : row.status,
-      bestScore: Math.max(current.bestScore, row.bestScore),
-      attempts: Math.max(current.attempts, row.attempts),
-      ...(row.lastExplanation ? { lastExplanation: row.lastExplanation } : {}),
-      ...(row.completedAt ? { completedAt: row.completedAt } : {}),
-    }
-  }
-  return { ...state, games, updatedAt: new Date().toISOString() }
-}
-
 export async function restoreOnlineState(participant: OnlineParticipant): Promise<{ state: Phase5State; error: Error | null }> {
   const local = loadOnlineState(participant) ?? createInitialState(participant.nickname)
-  const remote = await loadParticipantProgress(participant.participantId)
+  if (participant.rulesVersion !== 3) return { state: local, error: new Error('Esta partida usa la escala anterior y permanece separada de los recorridos v3.') }
+  const remote = await loadParticipantRunState(participant.participantId)
   if (remote.error) return { state: local, error: remote.error }
-  const state = mergeProgress(local, remote.progress)
-  onlineStore(participant.participantId).save(state)
-  if (participant.finishedAt) return { state, error: null }
-  const synced = await syncOnlineState(state)
-  return { state, error: synced.error }
+  if (participant.finishedAt) {
+    const finalized = remote.state ?? { ...local, finalizedAt: participant.finishedAt }
+    onlineStore(participant.participantId).save(finalized)
+    return { state: finalized, error: null }
+  }
+
+  const candidate = loadOnlineState(participant) ?? remote.state ?? local
+  const saved = await saveParticipantRunState(participant.participantId, candidate)
+  if (saved.state) {
+    onlineStore(participant.participantId).save(saved.state)
+    return { state: saved.state, error: null }
+  }
+  if (remote.state) {
+    onlineStore(participant.participantId).save(remote.state)
+    return { state: remote.state, error: saved.error }
+  }
+  return { state: candidate, error: saved.error }
 }
 
 export async function retryOnlineSync(): Promise<{ error: Error | null }> {
@@ -110,14 +107,26 @@ export async function retryOnlineSync(): Promise<{ error: Error | null }> {
 export async function syncOnlineState(state: Phase5State): Promise<{ error: Error | null }> {
   const participant = getOnlineParticipant()
   if (!participant || participant.finishedAt || !supabase) return { error: null }
+  if (participant.rulesVersion !== 3) return { error: new Error('La partida anterior no admite recorridos v3.') }
   const auth = await getCurrentUser()
   if (auth.error || !auth.user || !auth.user.is_anonymous) return { error: auth.error ?? new Error('La sesión anónima ya no está disponible.') }
-  for (const gameId of GAME_IDS) {
-    const game = state.games[gameId]
-    const result = await updateParticipantProgress(participant.participantId, gameId, game)
-    if (result.error) return result
-  }
-  return { error: null }
+  const result = await saveParticipantRunState(participant.participantId, state)
+  if (result.state) onlineStore(participant.participantId).save(result.state)
+  return { error: result.error }
+}
+
+export async function finalizeOnlineParticipation(state: Phase5State): Promise<{ state: Phase5State; error: Error | null }> {
+  const participant = getOnlineParticipant()
+  if (!participant || participant.rulesVersion !== 3) return { state, error: new Error('No hay una participación online v3 activa.') }
+  const synced = await syncOnlineState(state)
+  if (synced.error) return { state, error: synced.error }
+  const result = await finalizeParticipant(participant.participantId)
+  if (result.error || !result.finishedAt) return { state, error: result.error ?? new Error('Supabase no devolvió la fecha de finalización.') }
+  const finalized = finalizeLocalParticipation(state, result.finishedAt)
+  const identitySaved = saveOnlineParticipant({ ...participant, finishedAt: result.finishedAt })
+  if (!identitySaved.ok) return { state, error: new Error(identitySaved.error) }
+  const stateSaved = onlineStore(participant.participantId).save(finalized)
+  return stateSaved.ok ? { state: finalized, error: null } : { state, error: new Error(stateSaved.error) }
 }
 
 export function createActiveGameStore(): GameProgressStore {
@@ -130,7 +139,8 @@ export function notifyOnlineProgressUpdated(): void {
 }
 
 export function saveActiveGameState(state: Phase5State): PersistenceResult<void> {
-  if (getOnlineParticipant()?.finishedAt) return { ok: false, error: 'Tu participación ya fue finalizada y no admite nuevos resultados.' }
+  const participant = getOnlineParticipant()
+  if (participant?.finishedAt || (participant && state.finalizedAt)) return { ok: false, error: 'Tu participación ya fue finalizada y no admite nuevos resultados.' }
   const saved = createActiveGameStore().save(state)
   if (!saved.ok) return saved
   if (getOnlineParticipant()) {

@@ -4,7 +4,6 @@ import {
   createInitialState,
   notifyPhase5ProgressUpdated,
   evaluateClassifications,
-  resetGameProgress,
   saveClassificationEvaluation,
   type Classification,
   type ClassificationAnswers,
@@ -56,6 +55,11 @@ export function ClassificationGame() {
     return () => window.removeEventListener('filelab:online-progress-updated', refresh)
   }, [])
 
+  if (phaseState.games['classify-files'].status === 'completed') {
+    const result = phaseState.games['classify-files']
+    return <div className="rescue-game"><section className="classification-result is-success"><div><span>Resultado definitivo del recorrido</span><strong>{result.bestScore} / 100</strong></div><p>{result.lastExplanation}</p><small>Esta etapa ya fue evaluada. Podrás repetirla al iniciar un recorrido completo nuevo.</small></section></div>
+  }
+
   const updateAnswer = <K extends keyof Classification>(key: K, value: Classification[K]) => {
     setAnswers((current) => ({ ...current, [selectedFile.id]: { ...current[selectedFile.id], [key]: value } }))
     setEvaluation(null)
@@ -71,16 +75,6 @@ export function ClassificationGame() {
     setPersistenceMessage(saved && !saved.ok ? saved.error : 'Progreso guardado localmente.')
   }
 
-  const reset = () => {
-    const nextState = resetGameProgress(phaseState, 'classify-files')
-    setPhaseState(nextState)
-    setAnswers({})
-    setEvaluation(null)
-    const cleared = saveActiveGameState(nextState)
-    notifyPhase5ProgressUpdated()
-    setPersistenceMessage(cleared && !cleared.ok ? cleared.error : 'Etapa reiniciada. Tus otras etapas no se modificaron.')
-  }
-
   const handleDrop = (event: React.DragEvent<HTMLButtonElement>) => {
     const fileId = event.dataTransfer.getData('text/filelab-id')
     if (CLASSIFIABLE_FILES.some((file) => file.id === fileId)) setSelectedId(fileId)
@@ -94,9 +88,9 @@ export function ClassificationGame() {
           <h2>Clasificá los archivos</h2>
           <p>La central recibió archivos con etiquetas confusas. Inspeccioná la evidencia y ubicá cada uno sin mezclar <strong>tipo</strong>, <strong>formato</strong> y <strong>estructura</strong>.</p>
         </div>
-        <div className="rescue-score" aria-label={`Puntaje máximo 200, mejor puntaje ${phaseState.games['classify-files'].bestScore}`}>
+        <div className="rescue-score" aria-label={`Puntaje máximo 100, mejor puntaje ${phaseState.games['classify-files'].bestScore}`}>
           <span>Mejor resultado</span>
-          <strong>{phaseState.games['classify-files'].bestScore}<small>/200</small></strong>
+          <strong>{phaseState.games['classify-files'].bestScore}<small>/100</small></strong>
           <small>{phaseState.games['classify-files'].attempts} intento(s)</small>
         </div>
       </div>
@@ -152,12 +146,11 @@ export function ClassificationGame() {
 
       <div className="classification-actions">
         <button type="button" className="primary-action" onClick={submit}>Evaluar clasificación <span aria-hidden="true">→</span></button>
-        <button type="button" className="filelab-secondary-button" onClick={reset}>Reiniciar etapa</button>
         <span>{Object.values(answers).reduce((sum, answer) => sum + Object.keys(answer).length, 0)} / {CLASSIFIABLE_FILES.length * 3} decisiones tomadas</span>
       </div>
 
-      {evaluation && <section className={`classification-result ${evaluation.score === 200 ? 'is-success' : ''}`} aria-live="polite">
-        <div><span>Resultado</span><strong>{evaluation.score} / 200</strong></div>
+      {evaluation && <section className={`classification-result ${evaluation.score === 100 ? 'is-success' : ''}`} aria-live="polite">
+        <div><span>Resultado</span><strong>{evaluation.score} / 100</strong></div>
         <p>{evaluation.explanation}</p>
         {evaluation.checks.some((check) => !check.correct) && <div className="classification-errors"><strong>Pistas para corregir:</strong>{evaluation.checks.filter((check) => !check.correct).map((check) => <p key={check.fileId}><b>{CLASSIFIABLE_FILES.find((file) => file.id === check.fileId)?.name}</b> · {check.mistakes.join(' ')} {check.explanation}</p>)}</div>}
       </section>}

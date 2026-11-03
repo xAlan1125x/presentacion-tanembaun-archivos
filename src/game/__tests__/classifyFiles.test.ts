@@ -6,7 +6,7 @@ const correctAnswers = Object.fromEntries(CLASSIFIABLE_FILES.map((file) => [file
 describe('Clasificá los archivos', () => {
   it('evalúa correctamente tipo, formato y estructura sin mezclarlos', () => {
     const result = evaluateClassifications(correctAnswers)
-    expect(result).toMatchObject({ score: 200, completed: true, answeredFields: 18, totalFields: 18 })
+    expect(result).toMatchObject({ score: 100, completed: true, answeredFields: 9, totalFields: 9 })
     expect(result.checks.every((check) => check.correct)).toBe(true)
   })
 
@@ -17,17 +17,17 @@ describe('Clasificá los archivos', () => {
     expect(result.explanation).toContain('Cambiar .jpg por .txt no modifica los bytes.')
   })
 
-  it('mantiene coherentes los tres registros fijos con los 12 bytes mostrados', () => {
-    const students = CLASSIFIABLE_FILES.find((file) => file.id === 'students')
-    expect(students?.bytes.split(' ')).toHaveLength(12)
-    expect(students?.properties).toContain('12 bytes')
+  it('mantiene la evidencia binaria de la extensión engañosa', () => {
+    const photo = CLASSIFIABLE_FILES.find((file) => file.id === 'photo')
+    expect(photo?.bytes.split(' ')).toHaveLength(8)
+    expect(photo?.target.format).toBe('binary')
   })
 
-  it('guarda el mejor resultado y reinicia sólo esta etapa', () => {
+  it('guarda un resultado definitivo y no permite reiniciar sólo esta etapa', () => {
     const state = saveClassificationEvaluation(createInitialState('local'), evaluateClassifications(correctAnswers))
-    expect(state.games['classify-files'].bestScore).toBe(200)
+    expect(state.games['classify-files'].bestScore).toBe(100)
     const reset = resetGameProgress(state, 'classify-files')
-    expect(reset.games['classify-files']).toMatchObject({ status: 'not-started', bestScore: 0, attempts: 0 })
+    expect(reset.games['classify-files']).toMatchObject({ status: 'completed', bestScore: 100, attempts: 1 })
     expect(reset.games['digital-detective']).toEqual(state.games['digital-detective'])
   })
 })

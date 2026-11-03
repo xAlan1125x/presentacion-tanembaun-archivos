@@ -4,7 +4,6 @@ import {
   createInitialState,
   notifyPhase5ProgressUpdated,
   evaluateInvestigation,
-  resetGameProgress,
   saveDetectiveEvaluation,
   type DetectiveAnswers,
   type DetectiveEvaluation,
@@ -34,6 +33,11 @@ export function DigitalDetectiveGame() {
     window.addEventListener('filelab:online-progress-updated', refresh)
     return () => window.removeEventListener('filelab:online-progress-updated', refresh)
   }, [])
+
+  if (phaseState.games['digital-detective'].status === 'completed') {
+    const result = phaseState.games['digital-detective']
+    return <div className="detective-game"><section className="detective-result is-success"><div><span>Resultado definitivo del recorrido</span><strong>{result.bestScore} / 100</strong></div><p>{result.lastExplanation}</p><small>Esta etapa ya fue evaluada. Podrás repetirla al iniciar un recorrido completo nuevo.</small></section></div>
+  }
 
   const toggleEvidence = (id: string) => {
     setAnswers((current) => ({
@@ -65,16 +69,6 @@ export function DigitalDetectiveGame() {
     setPersistenceMessage(saved && !saved.ok ? saved.error : 'Expediente guardado localmente.')
   }
 
-  const reset = () => {
-    const nextState = resetGameProgress(phaseState, 'digital-detective')
-    setPhaseState(nextState)
-    setAnswers({ selectedEvidenceIds: [] })
-    setEvaluation(null)
-    const saved = saveActiveGameState(nextState)
-    notifyPhase5ProgressUpdated()
-    setPersistenceMessage(saved && !saved.ok ? saved.error : 'Caso reiniciado. Las otras etapas no se modificaron.')
-  }
-
   return (
     <div className="detective-game">
       <div className="detective-game__intro">
@@ -83,9 +77,9 @@ export function DigitalDetectiveGame() {
           <h2>Detective digital</h2>
           <p>La central recibió un archivo incompleto. Explorá el expediente, distinguí hechos de interpretaciones y reconstruí la secuencia que produjo el incidente.</p>
         </div>
-        <div className="detective-score" aria-label={`Mejor resultado ${phaseState.games['digital-detective'].bestScore} de 200`}>
+        <div className="detective-score" aria-label={`Mejor resultado ${phaseState.games['digital-detective'].bestScore} de 100`}>
           <span>Mejor resultado</span>
-          <strong>{phaseState.games['digital-detective'].bestScore}<small>/200</small></strong>
+          <strong>{phaseState.games['digital-detective'].bestScore}<small>/100</small></strong>
           <small>{phaseState.games['digital-detective'].attempts} intento(s)</small>
         </div>
       </div>
@@ -131,7 +125,10 @@ export function DigitalDetectiveGame() {
 
       <section className="detective-timeline" aria-labelledby="detective-timeline-title">
         <header><span>Registro de acontecimientos</span><strong id="detective-timeline-title">Secuencia temporal</strong></header>
-        <div>{DIGITAL_DETECTIVE_CASE.evidence.filter((item) => item.kind === 'event').map((item) => <button type="button" key={item.id} onClick={() => setInspectedId(item.id)} className={inspected.id === item.id ? 'is-active' : ''}><time>{item.timestamp}</time><strong>{item.title}</strong><small>{item.summary}</small></button>)}</div>
+        <div>{['source', 'creat', 'report'].map((id) => {
+          const item = DIGITAL_DETECTIVE_CASE.evidence.find((evidence) => evidence.id === id)
+          return item ? <button type="button" key={item.id} onClick={() => setInspectedId(item.id)} className={inspected.id === item.id ? 'is-active' : ''}><time>{item.timestamp}</time><strong>{item.title}</strong><small>{item.summary}</small></button> : null
+        })}</div>
       </section>
 
       <section className="detective-conclusion" aria-labelledby="detective-conclusion-title">
@@ -150,18 +147,21 @@ export function DigitalDetectiveGame() {
         </div>
         <div className="detective-actions">
           <button type="button" className="primary-action" onClick={submit}>Presentar diagnóstico <span aria-hidden="true">→</span></button>
-          <button type="button" className="filelab-secondary-button" onClick={reset}>Reiniciar caso</button>
           <span>{answers.selectedEvidenceIds.length} evidencia(s) marcada(s) · {answers.revealedHintIds?.length ?? 0} pista(s)</span>
         </div>
       </section>
 
-      {evaluation && <section className={`detective-result ${evaluation.score === 200 ? 'is-success' : ''}`} aria-live="polite">
-        <div><span>Resultado del expediente</span><strong>{evaluation.score} / 200</strong></div>
+      {evaluation && <section className={`detective-result ${evaluation.score === 100 ? 'is-success' : ''}`} aria-live="polite">
+        <div><span>Resultado del expediente</span><strong>{evaluation.score} / 100</strong></div>
         <p>{evaluation.explanation}</p>
         <div className="detective-result-details">
           <span>Evidencias relevantes: {evaluation.relevantEvidenceIds.length}/{DIGITAL_DETECTIVE_CASE.hypotheses[0].requiredEvidenceIds.length}</span>
           {evaluation.missingEvidenceIds.length > 0 && <span>Faltan: {evaluation.missingEvidenceIds.join(', ')}</span>}
+          {evaluation.contextualEvidenceIds.length > 0 && <span>Contextuales, no necesarias: {evaluation.contextualEvidenceIds.join(', ')}</span>}
           {evaluation.misleadingEvidenceIds.length > 0 && <span>Pistas engañosas marcadas: {evaluation.misleadingEvidenceIds.join(', ')}</span>}
+        </div>
+        <div className="detective-evidence-explanations">
+          {evaluation.evidenceExplanations.map((evidence) => <p key={evidence.evidenceId}><strong>{evidence.title}</strong> · {evidence.explanation}</p>)}
         </div>
       </section>}
       {persistenceMessage && <p className="detective-persistence" role="status">{persistenceMessage}</p>}

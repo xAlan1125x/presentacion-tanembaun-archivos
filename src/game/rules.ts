@@ -1,15 +1,24 @@
 import {
   GAME_IDS,
   GAME_MAX_SCORE,
+  FIXED_SCORE_GAME_IDS,
   PHASE5_STATE_VERSION,
-  TOTAL_MAX_SCORE,
   type GameEvaluation,
   type GameId,
+  type GameProgressMap,
   type Phase5State,
   type ScoreInput,
 } from './types'
 
 const clamp = (value: number, minimum: number, maximum: number) => Math.min(maximum, Math.max(minimum, value))
+
+const createRunId = (): string => globalThis.crypto?.randomUUID?.() ?? `run-${Date.now()}-${Math.random().toString(16).slice(2)}`
+
+function createEmptyGames(): GameProgressMap {
+  return Object.fromEntries(
+    GAME_IDS.map((gameId) => [gameId, { status: 'not-started', bestScore: 0, attempts: 0 }]),
+  ) as GameProgressMap
+}
 
 export function calculateScore(input: ScoreInput): number {
   if (!Number.isFinite(input.resolutionQuality) || !Number.isFinite(input.penaltyPoints ?? 0)) return 0
@@ -27,11 +36,24 @@ export function evaluateResolution(input: ScoreInput, explanation: string): Game
   }
 }
 
-export function createInitialState(playerId: string, now = new Date().toISOString()): Phase5State {
-  const games = Object.fromEntries(
-    GAME_IDS.map((gameId) => [gameId, { status: 'not-started', bestScore: 0, attempts: 0 }]),
-  ) as Phase5State['games']
-  return { version: PHASE5_STATE_VERSION, playerId, startedAt: now, updatedAt: now, games }
+export function createInitialState(playerId: string, now = new Date().toISOString(), runId = createRunId()): Phase5State {
+  return { version: PHASE5_STATE_VERSION, playerId, currentRunId: runId, currentRunNumber: 1, startedAt: now, updatedAt: now, games: createEmptyGames() }
+}
+
+export function isGameUnlocked(state: Phase5State, gameId: GameId): boolean {
+  const index = GAME_IDS.indexOf(gameId)
+  return index === 0 || GAME_IDS.slice(0, index).every((previousId) => state.games[previousId].status === 'completed')
+}
+
+export function isCurrentRunComplete(state: Phase5State): boolean {
+  return GAME_IDS.every((gameId) => state.games[gameId].status === 'completed')
+}
+
+function completedRun(state: Phase5State, completedAt: string) {
+  const scores = Object.fromEntries(GAME_IDS.map((gameId) => [gameId, state.games[gameId].bestScore])) as Record<GameId, number>
+  const fixedScore = FIXED_SCORE_GAME_IDS.reduce((sum, gameId) => sum + scores[gameId], 0)
+  const factoryScore = scores['escape-room']
+  return { runId: state.currentRunId, runNumber: state.currentRunNumber, scores, fixedGamesScore: fixedScore, factoryScore, totalScore: fixedScore + factoryScore, completedAt }
 }
 
 export function recordEvaluation(
@@ -40,30 +62,39 @@ export function recordEvaluation(
   evaluation: GameEvaluation,
   now = new Date().toISOString(),
 ): Phase5State {
+  if (state.finalizedAt || !isGameUnlocked(state, gameId) || state.games[gameId].status === 'completed') return state
   const previous = state.games[gameId]
-  const bestScore = Math.max(previous.bestScore, clamp(Math.round(evaluation.score), 0, GAME_MAX_SCORE))
-  return {
+  const maximum = gameId === 'escape-room' ? Number.MAX_SAFE_INTEGER : GAME_MAX_SCORE
+  const next: Phase5State = {
     ...state,
     updatedAt: now,
     games: {
       ...state.games,
       [gameId]: {
-        status: previous.status === 'completed' || evaluation.completed ? 'completed' : 'in-progress',
-        bestScore,
-        attempts: previous.attempts + 1,
+        status: evaluation.completed ? 'completed' : 'in-progress',
+        bestScore: clamp(Math.round(evaluation.score), 0, maximum),
+        attempts: evaluation.completed ? 1 : 0,
         lastExplanation: evaluation.explanation,
-        ...(evaluation.completed || previous.completedAt ? { completedAt: previous.completedAt ?? now } : {}),
+        ...(evaluation.completed ? { completedAt: now } : {}),
       },
     },
   }
+  if (!isCurrentRunComplete(next)) return next
+  const summary = completedRun(next, now)
+  return { ...next, bestRun: !next.bestRun || summary.totalScore > next.bestRun.totalScore ? summary : next.bestRun }
 }
 
 export function totalScore(state: Phase5State): number {
   return GAME_IDS.reduce((sum, gameId) => sum + state.games[gameId].bestScore, 0)
 }
 
+export function fixedGamesScore(state: Phase5State): number {
+  return FIXED_SCORE_GAME_IDS.reduce((sum, gameId) => sum + state.games[gameId].bestScore, 0)
+}
+
 export function progressPercentage(state: Phase5State): number {
-  return Math.round((totalScore(state) / TOTAL_MAX_SCORE) * 100)
+  const completed = GAME_IDS.filter((gameId) => state.games[gameId].status === 'completed').length
+  return Math.round((completed / GAME_IDS.length) * 100)
 }
 
 export function resetState(state: Phase5State, now = new Date().toISOString()): Phase5State {
@@ -71,12 +102,17 @@ export function resetState(state: Phase5State, now = new Date().toISOString()): 
 }
 
 export function resetGameProgress(state: Phase5State, gameId: GameId, now = new Date().toISOString()): Phase5State {
-  return {
-    ...state,
-    updatedAt: now,
-    games: {
-      ...state.games,
-      [gameId]: { status: 'not-started', bestScore: 0, attempts: 0 },
-    },
-  }
+  void gameId
+  void now
+  return state
+}
+
+export function startNewRun(state: Phase5State, now = new Date().toISOString(), runId = createRunId()): Phase5State {
+  if (state.finalizedAt || !isCurrentRunComplete(state)) return state
+  return { ...state, currentRunId: runId, currentRunNumber: state.currentRunNumber + 1, startedAt: now, updatedAt: now, games: createEmptyGames() }
+}
+
+export function finalizeLocalParticipation(state: Phase5State, now = new Date().toISOString()): Phase5State {
+  if (state.finalizedAt || !isCurrentRunComplete(state) || !state.bestRun) return state
+  return { ...state, finalizedAt: now, updatedAt: now }
 }

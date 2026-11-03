@@ -1,199 +1,263 @@
-import { FileLabSession, type LabSessionSnapshot } from '../lab'
 import { evaluateResolution, recordEvaluation } from './rules'
 import type { GameEvaluation, Phase5State } from './types'
 
-export type EscapeRoomAction = 'inspect' | 'select-file' | 'set-access' | 'open-archive' | 'seek' | 'read-secret' | 'prepare-recovery' | 'write-recovery' | 'verify' | 'close-all'
+export type ChaosProcessId = 'p1' | 'p2' | 'p3'
+export type ChaosFileId = 'informe.dat' | 'registro.log'
+export type ChaosOperation = 'read' | 'write'
+export type ChaosProcessStatus = 'idle' | 'ready' | 'waiting' | 'running' | 'release'
 
-export interface EscapeRoomActionRecord {
-  id: number
-  name: EscapeRoomAction
-  ok: boolean
-  message: string
+export interface ChaosRequest {
+  id: string
+  processId: ChaosProcessId
+  fileId: ChaosFileId
+  operation: ChaosOperation
+  availableAt: number
+  duration: number
 }
 
-export interface EscapeRoomStep {
-  id: string
-  title: string
-  description: string
-  unlocked: boolean
-  solved: boolean
-  explanation: string
+export const CHAOS_REQUESTS: readonly ChaosRequest[] = [
+  { id: 'r1', processId: 'p1', fileId: 'informe.dat', operation: 'read', availableAt: 0, duration: 3 },
+  { id: 'r2', processId: 'p2', fileId: 'registro.log', operation: 'write', availableAt: 0, duration: 4 },
+  { id: 'r3', processId: 'p3', fileId: 'informe.dat', operation: 'write', availableAt: 5, duration: 4 },
+  { id: 'r4', processId: 'p1', fileId: 'registro.log', operation: 'read', availableAt: 12, duration: 3 },
+  { id: 'r5', processId: 'p2', fileId: 'informe.dat', operation: 'write', availableAt: 20, duration: 4 },
+  { id: 'r6', processId: 'p3', fileId: 'registro.log', operation: 'read', availableAt: 28, duration: 3 },
+  { id: 'r7', processId: 'p1', fileId: 'informe.dat', operation: 'write', availableAt: 36, duration: 4 },
+  { id: 'r8', processId: 'p2', fileId: 'registro.log', operation: 'read', availableAt: 44, duration: 3 },
+  { id: 'r9', processId: 'p3', fileId: 'informe.dat', operation: 'read', availableAt: 52, duration: 3 },
+]
+
+interface ActiveUse {
+  requestId: string
+  remainingSeconds: number
+}
+
+export interface ChaosProcessSnapshot {
+  id: ChaosProcessId
+  name: string
+  status: ChaosProcessStatus
+  request?: ChaosRequest
+}
+
+export interface ChaosFileSnapshot {
+  id: ChaosFileId
+  label: string
+  holder?: ChaosProcessId
+  remainingSeconds: number
+  readyToRelease: boolean
 }
 
 export interface EscapeRoomSnapshot {
-  lab: LabSessionSnapshot
-  selectedFileId?: string
-  archiveDescriptor?: number
-  recoveryDescriptor?: number
-  pendingBytes: Uint8Array
-  steps: EscapeRoomStep[]
-  actions: EscapeRoomActionRecord[]
-  hintsUsed: string[]
+  elapsedSeconds: number
+  remainingSeconds: number
+  processes: ChaosProcessSnapshot[]
+  files: ChaosFileSnapshot[]
+  completedCount: number
+  totalRequests: number
+  score: number
+  penalties: number
+  failedActionCount: number
   message: string
-  completed: boolean
+  finished: boolean
 }
 
 export interface EscapeRoomEvaluation extends GameEvaluation {
-  solvedStepIds: string[]
-  descriptorsClosed: boolean
-  bytesRecovered: boolean
+  completedRequests: number
+  penalties: number
   failedActionCount: number
-  hintsUsed: string[]
 }
 
-export const ESCAPE_ROOM_HINTS = [
-  { id: 'identify', text: 'Compará tipo, formato y contenido: el archivo correcto es binario y contiene una cabecera legible.', penaltyPoints: 10 },
-  { id: 'access', text: 'readOnly restringe la escritura, no la lectura. Confirmá el modo de apertura que necesitás.', penaltyPoints: 10 },
-  { id: 'seek', text: 'La clave comienza después de HEADER|; usá acceso aleatorio para llegar a ese offset.', penaltyPoints: 10 },
-  { id: 'verify', text: 'La misión termina cuando recuperacion.txt coincide con los bytes leídos y no quedan descriptores.', penaltyPoints: 10 },
-]
+const PROCESS_NAMES: Record<ChaosProcessId, string> = {
+  p1: 'Proceso 1',
+  p2: 'Proceso 2',
+  p3: 'Proceso 3',
+}
 
-const STEPS: EscapeRoomStep[] = [
-  { id: 'identify', title: 'Identificar el archivo', description: 'Inspeccioná los candidatos y seleccioná el archivo binario que contiene la evidencia.', unlocked: true, solved: false, explanation: 'La evidencia está en rescate-final.bin: su formato binario y contenido con cabecera lo distinguen del señuelo.' },
-  { id: 'access', title: 'Interpretar la protección', description: 'Examiná los atributos y decidí si readOnly impide abrir el archivo para lectura.', unlocked: false, solved: false, explanation: 'readOnly bloquea modificaciones, pero no impide abrir este archivo para lectura. La protección debe interpretarse según la operación solicitada.' },
-  { id: 'seek', title: 'Localizar la clave', description: 'Abrí el archivo, reposicioná el cursor y leé el bloque recuperable.', unlocked: false, solved: false, explanation: 'La clave CLAVE-42 ocupa ocho bytes a partir del offset 7, después de HEADER|.' },
-  { id: 'recover', title: 'Recuperar la información', description: 'Prepará el archivo de recuperación y escribí los bytes obtenidos.', unlocked: false, solved: false, explanation: 'Los mismos bytes leídos deben escribirse en recuperacion.txt mediante el descriptor del destino.' },
-  { id: 'verify', title: 'Verificar y salir', description: 'Comprobá el contenido final y cerrá todos los descriptores.', unlocked: false, solved: false, explanation: 'La misión sólo es válida cuando el destino coincide byte a byte y el sistema no conserva descriptores abiertos.' },
-]
+const FILE_LABELS: Record<ChaosFileId, string> = {
+  'informe.dat': 'Informe de datos',
+  'registro.log': 'Registro del sistema',
+}
+
+const GAME_SECONDS = 90
+const ERROR_PENALTY = 5
+const POINTS_PER_REQUEST = 20
+const COMPLETION_BONUS = 20
 
 export class EscapeRoomGame {
-  private session = new FileLabSession('escape-room')
-  private selectedFileId?: string
-  private archiveDescriptor?: number
-  private recoveryDescriptor?: number
-  private pendingBytes = new Uint8Array()
-  private actions: EscapeRoomActionRecord[] = []
-  private hintsUsed: string[] = []
-  private message = 'La cámara está bloqueada. Inspeccioná los archivos candidatos.'
+  private elapsedSeconds = 0
+  private completed = new Set<string>()
+  private active = new Map<ChaosFileId, ActiveUse>()
+  private penalties = 0
+  private failedActionCount = 0
+  private finished = false
+  private message = 'Elegí un proceso y asignale el archivo que solicita.'
 
   snapshot(): EscapeRoomSnapshot {
-    const solved = this.solvedStepIds()
-    const steps = STEPS.map((step, index) => ({ ...step, unlocked: index === 0 || solved.includes(STEPS[index - 1].id), solved: solved.includes(step.id) }))
-    return { lab: this.session.snapshot(), selectedFileId: this.selectedFileId, archiveDescriptor: this.archiveDescriptor, recoveryDescriptor: this.recoveryDescriptor, pendingBytes: this.pendingBytes.slice(), steps, actions: this.actions.map((action) => ({ ...action })), hintsUsed: [...this.hintsUsed], message: this.message, completed: solved.length === STEPS.length }
+    return {
+      elapsedSeconds: this.elapsedSeconds,
+      remainingSeconds: Math.max(0, GAME_SECONDS - this.elapsedSeconds),
+      processes: (Object.keys(PROCESS_NAMES) as ChaosProcessId[]).map((id) => this.processSnapshot(id)),
+      files: (Object.keys(FILE_LABELS) as ChaosFileId[]).map((id) => this.fileSnapshot(id)),
+      completedCount: this.completed.size,
+      totalRequests: CHAOS_REQUESTS.length,
+      score: this.score(),
+      penalties: this.penalties,
+      failedActionCount: this.failedActionCount,
+      message: this.message,
+      finished: this.finished,
+    }
   }
 
-  restore(): EscapeRoomSnapshot {
-    this.session = new FileLabSession('escape-room')
-    this.selectedFileId = undefined
-    this.archiveDescriptor = undefined
-    this.recoveryDescriptor = undefined
-    this.pendingBytes = new Uint8Array()
-    this.actions = []
-    this.hintsUsed = []
-    this.message = 'Escenario restaurado. La misión vuelve al primer objetivo.'
+  assign(processId: ChaosProcessId, fileId: ChaosFileId): EscapeRoomSnapshot {
+    if (this.finished) return this.snapshot()
+
+    const request = this.currentRequest(processId)
+    if (!request || request.availableAt > this.elapsedSeconds) {
+      return this.fail('Ese proceso todavía no tiene una solicitud disponible.')
+    }
+    if (this.findActiveByProcess(processId)) {
+      return this.fail(PROCESS_NAMES[processId] + ' ya está trabajando con un archivo.')
+    }
+    if (request.fileId !== fileId) {
+      return this.fail(PROCESS_NAMES[processId] + ' necesita ' + request.fileId + ', no ese archivo.')
+    }
+    if (this.active.has(fileId)) {
+      return this.fail(fileId + ' está ocupado: el proceso debe esperar hasta que se libere.')
+    }
+
+    this.active.set(fileId, { requestId: request.id, remainingSeconds: request.duration })
+    this.message = 'open: ' + PROCESS_NAMES[processId] + ' inició ' + request.operation + ' sobre ' + fileId + '.'
     return this.snapshot()
   }
 
-  inspect(fileId: string): EscapeRoomSnapshot {
-    const result = this.session.getAttributes(fileId)
-    return this.record('inspect', result.ok, result.ok ? `Atributos inspeccionados: ${fileId}.` : result.error.message)
-  }
+  release(fileId: ChaosFileId): EscapeRoomSnapshot {
+    if (this.finished) return this.snapshot()
 
-  selectFile(fileId: string): EscapeRoomSnapshot {
-    const file = this.session.snapshot().engine.files.find((candidate) => candidate.id === fileId)
-    const correct = Boolean(file && file.id === 'archive' && file.type === 'regular' && file.format === 'binary' && new TextDecoder().decode(file.content).includes('HEADER|'))
-    if (correct) this.selectedFileId = fileId
-    return this.record('select-file', correct, correct ? 'Archivo candidato confirmado por tipo, formato y contenido.' : 'Ese candidato no reúne las evidencias del archivo de recuperación.')
-  }
+    const use = this.active.get(fileId)
+    if (!use) return this.fail(fileId + ' ya está libre.')
+    if (use.remainingSeconds > 0) {
+      return this.fail('La operación aún no terminó. Esperá antes de cerrar y liberar el archivo.')
+    }
 
-  setAccess(): EscapeRoomSnapshot {
-    if (!this.selectedFileId) return this.record('set-access', false, 'Seleccioná primero el archivo de evidencia.')
-    const result = this.session.getAttributes('archive')
-    return this.record('set-access', result.ok, result.ok ? 'readOnly está activa: impide escribir, pero permite abrir este archivo en modo lectura.' : result.error.message)
-  }
-
-  openArchive(): EscapeRoomSnapshot {
-    if (!this.stepSolved('access')) return this.record('open-archive', false, 'Primero resolvé la restricción de acceso.')
-    const result = this.session.open('archive', 'read')
-    if (result.ok) this.archiveDescriptor = result.value.descriptor
-    return this.record('open-archive', result.ok, result.ok ? `Archivo abierto con fd ${result.value.descriptor}.` : result.error.message)
-  }
-
-  seek(offset: number): EscapeRoomSnapshot {
-    if (this.archiveDescriptor === undefined) return this.record('seek', false, 'Abrí el archivo antes de usar seek.')
-    const result = this.session.seek(this.archiveDescriptor, offset)
-    return this.record('seek', result.ok, result.ok ? `Cursor reposicionado en ${offset}.` : result.error.message)
-  }
-
-  readSecret(): EscapeRoomSnapshot {
-    if (this.archiveDescriptor === undefined) return this.record('read-secret', false, 'Abrí el archivo antes de leer.')
-    const result = this.session.read(this.archiveDescriptor, 8)
-    if (result.ok && result.value.outcome === 'data') this.pendingBytes = result.value.buffer.data.slice(0, result.value.buffer.validLength)
-    return this.record('read-secret', result.ok && result.value.outcome === 'data' && this.pendingBytes.length === 8, result.ok ? `read recuperó ${result.value.bytesTransferred} byte(s).` : result.error.message)
-  }
-
-  prepareRecovery(): EscapeRoomSnapshot {
-    if (!this.stepSolved('seek')) return this.record('prepare-recovery', false, 'Primero recuperá los bytes mediante seek y read.')
-    const result = this.session.creatFile('recuperacion.txt')
-    if (result.ok) this.recoveryDescriptor = result.value.descriptor
-    return this.record('prepare-recovery', result.ok, result.ok ? `Destino preparado con fd ${result.value.descriptor}.` : result.error.message)
-  }
-
-  writeRecovery(): EscapeRoomSnapshot {
-    if (this.recoveryDescriptor === undefined || this.pendingBytes.length === 0) return this.record('write-recovery', false, 'Prepará el destino y conservá los bytes recuperados.')
-    const result = this.session.write(this.recoveryDescriptor, this.pendingBytes)
-    return this.record('write-recovery', result.ok, result.ok ? `Se escribieron ${result.value.bytesTransferred} byte(s) recuperados.` : result.error.message)
-  }
-
-  verify(): EscapeRoomSnapshot {
-    const files = this.session.snapshot().engine.files
-    const archive = files.find((file) => file.id === 'archive')?.content
-    const recovery = files.find((file) => file.id === 'recovery')?.content
-    const bytesRecovered = Boolean(archive && recovery && recovery.length === 8 && recovery.every((byte, index) => byte === archive[index + 7]))
-    return this.record('verify', bytesRecovered, bytesRecovered ? 'La información recuperada coincide con el bloque de evidencia.' : 'El archivo de recuperación todavía no contiene los bytes correctos.')
-  }
-
-  closeAll(): EscapeRoomSnapshot {
-    const handles = this.session.snapshot().engine.processes[0]?.openFiles ?? []
-    if (handles.length === 0) return this.record('close-all', false, 'No hay descriptores abiertos para cerrar.')
-    handles.forEach((handle) => this.session.close(handle.descriptor))
-    return this.record('close-all', true, `${handles.length} descriptor(es) cerrado(s).`)
-  }
-
-  useHint(id: string): EscapeRoomSnapshot {
-    const hint = ESCAPE_ROOM_HINTS.find((item) => item.id === id)
-    if (hint && !this.hintsUsed.includes(id)) {
-      this.hintsUsed.push(id)
-      this.message = `${hint.text} Penalización: ${hint.penaltyPoints} puntos.`
+    this.active.delete(fileId)
+    this.completed.add(use.requestId)
+    this.message = 'close: solicitud completada y ' + fileId + ' quedó disponible.'
+    if (this.completed.size === CHAOS_REQUESTS.length) {
+      this.finished = true
+      this.message = '¡Sistema organizado! Completaste todas las solicitudes.'
     }
     return this.snapshot()
   }
 
-  evaluate(): EscapeRoomEvaluation {
-    const snapshot = this.snapshot()
-    const solvedStepIds = snapshot.steps.filter((step) => step.solved).map((step) => step.id)
-    const descriptorsClosed = snapshot.lab.engine.processes.every((process) => process.openFiles.length === 0)
-    const files = snapshot.lab.engine.files
-    const archive = files.find((file) => file.id === 'archive')?.content
-    const recovery = files.find((file) => file.id === 'recovery')?.content
-    const bytesRecovered = Boolean(archive && recovery && recovery.length === 8 && recovery.every((byte, index) => byte === archive[index + 7]))
-    const completed = solvedStepIds.length === STEPS.length && descriptorsClosed && bytesRecovered
-    const penaltyPoints = this.hintsUsed.reduce((sum, id) => sum + (ESCAPE_ROOM_HINTS.find((hint) => hint.id === id)?.penaltyPoints ?? 0), 0)
-    return { ...evaluateResolution({ resolutionQuality: completed ? 1 : solvedStepIds.length / STEPS.length, completed, penaltyPoints }, completed ? 'Misión completada: se identificó, interpretó la protección, leyó, recuperó y verificó la evidencia; no quedaron descriptores abiertos.' : `Misión incompleta: faltan ${STEPS.filter((step) => !solvedStepIds.includes(step.id)).map((step) => step.title).join(', ')} o cerrar los descriptores abiertos.`), solvedStepIds, descriptorsClosed, bytesRecovered, failedActionCount: this.actions.filter((action) => !action.ok).length, hintsUsed: [...this.hintsUsed] }
-  }
+  tick(seconds = 1): EscapeRoomSnapshot {
+    if (this.finished || seconds <= 0) return this.snapshot()
 
-  private solvedStepIds(): string[] {
-    const files = this.session.snapshot().engine.files
-    const archive = files.find((file) => file.id === 'archive')?.content
-    const recovery = files.find((file) => file.id === 'recovery')?.content
-    const bytesRecovered = Boolean(archive && recovery && recovery.length === 8 && recovery.every((byte, index) => byte === archive[index + 7]))
-    const archiveOpened = this.actions.some((action) => action.name === 'open-archive' && action.ok)
-    const read = this.pendingBytes.length === 8 && this.actions.some((action) => action.name === 'read-secret' && action.ok)
-    const access = this.actions.some((action) => action.name === 'set-access' && action.ok)
-    const selected = this.selectedFileId === 'archive'
-    const wrote = this.actions.some((action) => action.name === 'write-recovery' && action.ok) && bytesRecovered
-    return [selected, access, archiveOpened && read, wrote, wrote && bytesRecovered && this.actions.some((action) => action.name === 'verify' && action.ok) && this.session.snapshot().engine.processes.every((process) => process.openFiles.length === 0)].map((value, index) => value ? STEPS[index].id : '').filter(Boolean)
-  }
-
-  private stepSolved(id: string): boolean { return this.solvedStepIds().includes(id) }
-
-  private record(name: EscapeRoomAction, ok: boolean, message: string): EscapeRoomSnapshot {
-    this.actions.push({ id: this.actions.length + 1, name, ok, message })
-    this.message = message
+    const advance = Math.min(seconds, GAME_SECONDS - this.elapsedSeconds)
+    this.elapsedSeconds += advance
+    for (const use of this.active.values()) {
+      use.remainingSeconds = Math.max(0, use.remainingSeconds - advance)
+    }
+    if (this.elapsedSeconds >= GAME_SECONDS) {
+      this.finished = true
+      this.message = 'Tiempo terminado. Las solicitudes completadas determinan tu puntuación.'
+    }
     return this.snapshot()
+  }
+
+  restore(): EscapeRoomSnapshot {
+    this.elapsedSeconds = 0
+    this.completed.clear()
+    this.active.clear()
+    this.penalties = 0
+    this.failedActionCount = 0
+    this.finished = false
+    this.message = 'Elegí un proceso y asignale el archivo que solicita.'
+    return this.snapshot()
+  }
+
+  evaluate(): EscapeRoomEvaluation {
+    const score = this.score()
+    const base = evaluateResolution(
+      { resolutionQuality: score / 200, completed: this.finished },
+      'Cada archivo admite un solo proceso a la vez en este modelo didáctico. Abrir, usar y cerrar libera el recurso para la siguiente solicitud.',
+    )
+    return {
+      ...base,
+      score,
+      completedRequests: this.completed.size,
+      penalties: this.penalties,
+      failedActionCount: this.failedActionCount,
+    }
+  }
+
+  private score(): number {
+    const bonus = this.completed.size === CHAOS_REQUESTS.length ? COMPLETION_BONUS : 0
+    return Math.max(0, Math.min(200, this.completed.size * POINTS_PER_REQUEST + bonus - this.penalties))
+  }
+
+  private fail(message: string): EscapeRoomSnapshot {
+    this.penalties += ERROR_PENALTY
+    this.failedActionCount += 1
+    this.message = message + ' −' + ERROR_PENALTY + ' puntos.'
+    return this.snapshot()
+  }
+
+  private currentRequest(processId: ChaosProcessId): ChaosRequest | undefined {
+    const activeUse = this.findActiveByProcess(processId)
+    if (activeUse) return CHAOS_REQUESTS.find((request) => request.id === activeUse[1].requestId)
+    return CHAOS_REQUESTS.find(
+      (request) => request.processId === processId && !this.completed.has(request.id),
+    )
+  }
+
+  private findActiveByProcess(processId: ChaosProcessId): [ChaosFileId, ActiveUse] | undefined {
+    return [...this.active.entries()].find(([, use]) => {
+      const request = CHAOS_REQUESTS.find((candidate) => candidate.id === use.requestId)
+      return request?.processId === processId
+    })
+  }
+
+  private processSnapshot(id: ChaosProcessId): ChaosProcessSnapshot {
+    const request = this.currentRequest(id)
+    if (!request || request.availableAt > this.elapsedSeconds) {
+      return { id, name: PROCESS_NAMES[id], status: 'idle', request }
+    }
+
+    const activeUse = this.findActiveByProcess(id)
+    if (activeUse) {
+      return {
+        id,
+        name: PROCESS_NAMES[id],
+        status: activeUse[1].remainingSeconds === 0 ? 'release' : 'running',
+        request,
+      }
+    }
+
+    return {
+      id,
+      name: PROCESS_NAMES[id],
+      status: this.active.has(request.fileId) ? 'waiting' : 'ready',
+      request,
+    }
+  }
+
+  private fileSnapshot(id: ChaosFileId): ChaosFileSnapshot {
+    const use = this.active.get(id)
+    const request = use ? CHAOS_REQUESTS.find((candidate) => candidate.id === use.requestId) : undefined
+    return {
+      id,
+      label: FILE_LABELS[id],
+      holder: request?.processId,
+      remainingSeconds: use?.remainingSeconds ?? 0,
+      readyToRelease: Boolean(use && use.remainingSeconds === 0),
+    }
   }
 }
 
-export function saveEscapeRoomEvaluation(state: Phase5State, evaluation: EscapeRoomEvaluation, now?: string): Phase5State {
+export function saveEscapeRoomEvaluation(
+  state: Phase5State,
+  evaluation: EscapeRoomEvaluation,
+  now?: string,
+): Phase5State {
   return recordEvaluation(state, 'escape-room', evaluation, now)
 }

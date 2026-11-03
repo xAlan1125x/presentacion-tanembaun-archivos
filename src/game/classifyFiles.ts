@@ -44,26 +44,6 @@ export const CLASSIFIABLE_FILES: ClassifiableFile[] = [
     explanation: 'Cambiar .jpg por .txt no modifica los bytes. La evidencia de la cabecera indica contenido binario aunque el nombre diga .txt.',
   },
   {
-    id: 'students',
-    name: 'alumnos.dat',
-    description: 'Tres registros de longitud fija para recorrer por posición.',
-    bytes: '01 41 6E 61 02 4C 75 7A 03 53 6F 6C',
-    header: '3 registros · 4 bytes cada uno',
-    properties: ['regular', '12 bytes', 'longitud fija'],
-    target: { type: 'regular', format: 'binary', structure: 'records' },
-    explanation: 'Es un archivo regular binario organizado en registros de longitud fija: la estructura no es otra clase de archivo.',
-  },
-  {
-    id: 'catalog',
-    name: 'catalogo.idx',
-    description: 'Registros ordenados por una llave para localizar entradas.',
-    bytes: '20: Ana | 50: Luz | 80: Sol',
-    header: 'llave en posición fija · índice ordenado',
-    properties: ['regular', '24 bytes', 'búsqueda por llave'],
-    target: { type: 'regular', format: 'binary', structure: 'tree' },
-    explanation: 'La llave organiza los registros como un árbol de búsqueda. Sigue siendo regular y binario; estructura no equivale a tipo.',
-  },
-  {
     id: 'terminal',
     name: 'terminal0',
     description: 'Flujo de caracteres producido por un dispositivo.',
@@ -72,16 +52,6 @@ export const CLASSIFIABLE_FILES: ClassifiableFile[] = [
     properties: ['dispositivo', 'flujo', 'E/S de caracteres'],
     target: { type: 'character-special', format: 'not-applicable', structure: 'not-applicable' },
     explanation: 'Es especial de caracteres: representa un flujo de E/S. No se clasifica como texto regular sólo porque transporte caracteres.',
-  },
-  {
-    id: 'disk',
-    name: 'disco0',
-    description: 'Dispositivo que transfiere bloques de almacenamiento.',
-    bytes: 'bloque 0000 · bloque 0001',
-    header: 'acceso por bloques',
-    properties: ['dispositivo', 'bloques', 'almacenamiento'],
-    target: { type: 'block-special', format: 'not-applicable', structure: 'not-applicable' },
-    explanation: 'Es especial de bloques: representa almacenamiento por unidades. Tipo de archivo y formato de datos son conceptos distintos.',
   },
 ]
 

@@ -1,5 +1,5 @@
 import type { AuthError, User } from '@supabase/supabase-js'
-import { GAME_IDS, type GameId } from '../game'
+import { GAME_IDS, parsePhase5State, type GameId, type Phase5State } from '../game'
 import { supabase } from './client'
 import type { OnlineSession, ParticipantProgressRow, RankingEntry, SessionParticipantSummary } from './types'
 import type { GameProgress } from '../game'
@@ -10,6 +10,7 @@ interface SessionRow {
   name: string
   join_code: string
   status: 'active' | 'closed'
+  rules_version?: number
   created_at: string
   closed_at: string | null
 }
@@ -21,6 +22,7 @@ function mapSession(row: SessionRow): OnlineSession {
     name: row.name,
     joinCode: row.join_code,
     status: row.status,
+    rulesVersion: Number(row.rules_version ?? 1),
     createdAt: row.created_at,
     ...(row.closed_at ? { closedAt: row.closed_at } : {}),
   }
@@ -59,7 +61,7 @@ export async function createTeacherSession(name: string): Promise<{ session: Onl
 
 export async function listTeacherSessions(): Promise<{ sessions: OnlineSession[]; error: Error | null }> {
   if (!supabase) return { sessions: [], error: getSupabaseUnavailableError() }
-  const { data, error } = await supabase.from('sessions').select('id, owner_id, name, join_code, status, created_at, closed_at').order('created_at', { ascending: false })
+  const { data, error } = await supabase.from('sessions').select('id, owner_id, name, join_code, status, rules_version, created_at, closed_at').order('created_at', { ascending: false })
   if (error) return { sessions: [], error }
   return { sessions: (data as SessionRow[]).map(mapSession), error: null }
 }
@@ -78,17 +80,20 @@ export async function signInAnonymousParticipant(): Promise<{ user: User | null;
   return { user: result.data.user, error: result.error }
 }
 
-export async function joinSession(joinCode: string, nickname: string): Promise<{ participantId: string | null; sessionId: string | null; nickname: string | null; finishedAt: string | null; error: Error | null }> {
-  if (!supabase) return { participantId: null, sessionId: null, nickname: null, finishedAt: null, error: getSupabaseUnavailableError() }
+export async function joinSession(joinCode: string, nickname: string): Promise<{ participantId: string | null; sessionId: string | null; nickname: string | null; finishedAt: string | null; rulesVersion: number | null; state: Phase5State | null; error: Error | null }> {
+  if (!supabase) return { participantId: null, sessionId: null, nickname: null, finishedAt: null, rulesVersion: null, state: null, error: getSupabaseUnavailableError() }
   const { data, error } = await supabase.rpc('join_game_session', { requested_code: joinCode.trim().toUpperCase(), participant_nickname: nickname.trim() })
-  if (error) return { participantId: null, sessionId: null, nickname: null, finishedAt: null, error }
+  if (error) return { participantId: null, sessionId: null, nickname: null, finishedAt: null, rulesVersion: null, state: null, error }
   const row = Array.isArray(data) ? data[0] : data
+  const parsedState = parseRemoteState(row?.run_state)
   return {
     participantId: row?.participant_id ?? null,
     sessionId: row?.session_id ?? null,
     nickname: row?.nickname ?? null,
     finishedAt: row?.finished_at ?? null,
-    error: row ? null : new Error('Supabase no devolvió el participante.'),
+    rulesVersion: row?.rules_version == null ? null : Number(row.rules_version),
+    state: parsedState.state,
+    error: !row ? new Error('Supabase no devolvió el participante.') : parsedState.error,
   }
 }
 
@@ -107,6 +112,8 @@ export async function loadSessionRanking(sessionId: string): Promise<{ ranking: 
     ranking: (Array.isArray(data) ? data : []).map((row) => ({
       position: Number(row.position),
       nickname: String(row.nickname),
+      academicScore: Number(row.academic_score),
+      factoryScore: Number(row.factory_score),
       totalScore: Number(row.total_score),
     })),
     error: null,
@@ -115,20 +122,37 @@ export async function loadSessionRanking(sessionId: string): Promise<{ ranking: 
 
 export async function loadSessionParticipantSummary(sessionId: string): Promise<{ participants: SessionParticipantSummary[]; error: Error | null }> {
   if (!supabase) return { participants: [], error: getSupabaseUnavailableError() }
-  const { data, error } = await supabase.from('participants').select('id, nickname, finished_at, participant_progress(best_score)').eq('session_id', sessionId).order('created_at', { ascending: true })
+  const { data, error } = await supabase.rpc('get_session_participant_summary', { target_session_id: sessionId })
   if (error) return { participants: [], error }
   return {
-    participants: (data as Array<Record<string, unknown>>).map((row) => {
-      const progress = Array.isArray(row.participant_progress) ? row.participant_progress as Array<{ best_score?: number }> : []
-      return {
-        participantId: String(row.id),
-        nickname: String(row.nickname),
-        ...(typeof row.finished_at === 'string' ? { finishedAt: row.finished_at } : {}),
-        totalScore: progress.reduce((sum, item) => sum + Number(item.best_score ?? 0), 0),
-      }
-    }),
+    participants: (Array.isArray(data) ? data : []).map((row) => ({
+      participantId: String(row.participant_id),
+      nickname: String(row.nickname),
+      ...(typeof row.finished_at === 'string' ? { finishedAt: row.finished_at } : {}),
+      academicScore: Number(row.academic_score),
+      factoryScore: Number(row.factory_score),
+      totalScore: Number(row.total_score),
+    })),
     error: null,
   }
+}
+
+function parseRemoteState(data: unknown): { state: Phase5State | null; error: Error | null } {
+  if (data == null) return { state: null, error: null }
+  const parsed = parsePhase5State(data)
+  return parsed.ok ? { state: parsed.value, error: null } : { state: null, error: new Error(parsed.error) }
+}
+
+export async function loadParticipantRunState(participantId: string): Promise<{ state: Phase5State | null; error: Error | null }> {
+  if (!supabase) return { state: null, error: getSupabaseUnavailableError() }
+  const { data, error } = await supabase.rpc('get_participant_run_state_v3', { target_participant_id: participantId })
+  return error ? { state: null, error } : parseRemoteState(data)
+}
+
+export async function saveParticipantRunState(participantId: string, state: Phase5State): Promise<{ state: Phase5State | null; error: Error | null }> {
+  if (!supabase) return { state: null, error: getSupabaseUnavailableError() }
+  const { data, error } = await supabase.rpc('save_participant_run_state_v3', { target_participant_id: participantId, next_state: state })
+  return error ? { state: null, error } : parseRemoteState(data)
 }
 
 export async function updateParticipantProgress(participantId: string, gameId: GameId, progress: GameProgress): Promise<{ error: Error | null }> {

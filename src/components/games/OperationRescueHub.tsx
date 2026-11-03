@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 import {
   createInitialState,
   createLocalGameStore,
+  fixedGamesScore,
   GAME_IDS,
+  isGameUnlocked,
   notifyPhase5ProgressUpdated,
   PHASE5_PROGRESS_EVENT,
   totalScore,
@@ -13,6 +15,7 @@ import {
 } from '../../game'
 import { TeacherSessionPanel } from '../online/TeacherSessionPanel'
 import {
+  createActiveGameStore,
   getOnlineParticipant,
   loadOnlineState,
   clearOnlineParticipant,
@@ -21,7 +24,6 @@ import {
   saveOnlineParticipant,
   signInAnonymousParticipant,
   joinSession,
-  finalizeParticipant,
   loadSessionRanking,
   ONLINE_PROGRESS_EVENT,
 } from '../../supabase'
@@ -38,7 +40,7 @@ const GAME_DETAILS: Record<GameId, { title: string; section: string; concept: st
   'digital-detective': { title: 'Detective digital', section: 'detective-digital', concept: 'evidencias, atributos y acontecimientos' },
   'repair-system': { title: 'Repará el sistema', section: 'reparar-sistema', concept: 'permisos, descriptores y cursores' },
   'copyfile-challenge': { title: 'Copyfile Challenge', section: 'copyfile-challenge', concept: 'búferes, transferencias y EOF' },
-  'escape-room': { title: 'Escape Room', section: 'escape-room', concept: 'integración de 4.1.1–4.1.7' },
+  'escape-room': { title: 'FileLab Factory', section: 'filelab-factory', concept: 'secuencias de llamadas y gestión de pedidos' },
 }
 
 function loadSavedState(): Phase5State | null {
@@ -85,6 +87,10 @@ export function OperationRescueHub({ state, onStateChange, onNavigate }: Operati
   useEffect(() => {
     const participant = getOnlineParticipant()
     if (!participant || (joinCode && participant.joinCode !== joinCode)) return
+    if (participant.rulesVersion !== 3) {
+      setOnlineMessage('La partida guardada usa la escala anterior y no se mezcla con los recorridos nuevos.')
+      return
+    }
     void restoreOnlineState(participant).then((result) => {
       onStateChange(result.state)
       setOnlineMessage(result.error ? `Sin conexión: ${result.error.message}` : `Partida online recuperada como ${participant.nickname}.`)
@@ -153,32 +159,23 @@ export function OperationRescueHub({ state, onStateChange, onNavigate }: Operati
       setOnlineBusy(false)
       return
     }
-    const participant = { participantId: joined.participantId, sessionId: joined.sessionId, joinCode: joinCode.trim().toUpperCase(), nickname: joined.nickname, ...(joined.finishedAt ? { finishedAt: joined.finishedAt } : {}) }
+    if (joined.rulesVersion !== 3) {
+      setOnlineMessage('Esta es una partida de la escala anterior. Sus resultados se conservan, pero no se pueden mezclar con recorridos v3.')
+      setOnlineBusy(false)
+      return
+    }
+    const participant = { participantId: joined.participantId, sessionId: joined.sessionId, joinCode: joinCode.trim().toUpperCase(), nickname: joined.nickname, rulesVersion: joined.rulesVersion, ...(joined.finishedAt ? { finishedAt: joined.finishedAt } : {}) }
     const saved = saveOnlineParticipant(participant)
     if (!saved.ok) {
       setOnlineMessage(saved.error)
       setOnlineBusy(false)
       return
     }
+    if (joined.state) createActiveGameStore().save(joined.state)
     const restored = await restoreOnlineState(participant)
     setOnlineMessage(restored.error ? `Ingresaste, pero falta sincronizar: ${restored.error.message}` : 'Partida online guardada y lista para jugar.')
     setOnlineBusy(false)
     onStateChange(restored.state)
-  }
-
-  const reset = () => {
-    if (!window.confirm('¿Reiniciar toda la partida de Operación Rescate? Se borrarán sus cinco resultados, pero no el explorador ni las demostraciones.')) return
-    const cleared = getOnlineParticipant()
-      ? clearOnlineParticipant()
-      : createLocalGameStore(window.localStorage).clear()
-    if (!cleared.ok) {
-      setError(cleared.error)
-      return
-    }
-
-    setError('')
-    onStateChange(null)
-    notifyPhase5ProgressUpdated()
   }
 
   const leaveOnline = () => {
@@ -191,24 +188,6 @@ export function OperationRescueHub({ state, onStateChange, onNavigate }: Operati
 
     setOnlineMessage('Partida online desconectada. El modo local vuelve a estar disponible.')
     onStateChange(null)
-  }
-
-  const finishOnlineParticipation = async () => {
-    const participant = getOnlineParticipant()
-    if (!participant || !state || GAME_IDS.some((gameId) => state.games[gameId].status !== 'completed')) return
-    if (!window.confirm('¿Finalizar tu participación? Después no podrás modificar tus resultados en esta partida.')) return
-    setOnlineBusy(true)
-    const result = await finalizeParticipant(participant.participantId)
-    if (result.error) {
-      setOnlineMessage(result.error.message)
-      setOnlineBusy(false)
-      return
-    }
-    const saved = saveOnlineParticipant({ ...participant, finishedAt: result.finishedAt ?? new Date().toISOString() })
-    setOnlineMessage(saved.ok ? 'Participación finalizada. Tus resultados ya están en la clasificación.' : saved.error)
-    const refreshed = await loadSessionRanking(participant.sessionId)
-    if (!refreshed.error) setRanking(refreshed.ranking)
-    setOnlineBusy(false)
   }
 
   if (!state) {
@@ -249,23 +228,27 @@ export function OperationRescueHub({ state, onStateChange, onNavigate }: Operati
   }
 
   const score = totalScore(state)
+  const firstFourScore = fixedGamesScore(state)
+  const factoryScore = state.games['escape-room'].bestScore
   const completed = GAME_IDS.filter((gameId) => state.games[gameId].status === 'completed').length
+  const finalized = Boolean(state.finalizedAt || getOnlineParticipant()?.finishedAt)
   return (
     <div className="rescue-hub">
       <div className="rescue-hub__header">
-        <div><span className="eyebrow">{getOnlineParticipant() ? 'Partida online de' : 'Partida local de'}</span><h2>{state.playerId}</h2><p>{getOnlineParticipant()?.finishedAt ? 'Tu participación está finalizada.' : 'Elegí cualquier etapa disponible. Podés repetirla: el panel conserva sólo el mejor resultado de cada una.'}</p></div>
-        <div className="rescue-hub__total" aria-label={`Puntuación total ${score} de 1000`}><span>Puntuación total</span><strong>{score}<small>/1.000</small></strong><div><i style={{ width: `${progressPercentage(state)}%` }} /></div><small>{completed}/5 etapas completadas</small></div>
+        <div><span className="eyebrow">{getOnlineParticipant() ? 'Partida online de' : 'Partida local de'}</span><h2>{state.playerId}</h2><p>{finalized ? 'Tu participación está finalizada.' : `Recorrido ${state.currentRunNumber}: completá las etapas en orden. Cada una admite un único resultado.`}</p></div>
+        <div className="rescue-hub__total" aria-label={`Puntuación total ${score}`}><span>Primeros cuatro</span><strong>{firstFourScore}<small>/400</small></strong><span>Factory: {factoryScore} · Total: {score}</span><div><i style={{ width: `${progressPercentage(state)}%` }} /></div><small>{completed}/5 etapas completadas</small></div>
       </div>
       {onlineMessage && <p className="rescue-hub__privacy" role="status">{onlineMessage}</p>}
       <div className="rescue-hub__stages">{GAME_IDS.map((gameId) => {
         const game = state.games[gameId]
         const details = GAME_DETAILS[gameId]
-        const status = game.status === 'completed' ? 'Completada' : game.status === 'in-progress' ? 'Iniciada' : 'Pendiente'
-        return <article key={gameId} className={`rescue-hub__stage rescue-hub__stage--${game.status}`}><div className="rescue-hub__stage-number">{GAME_IDS.indexOf(gameId) + 1}</div><div className="rescue-hub__stage-content"><span>{status}</span><h3>{details.title}</h3><p>{details.concept}</p><small>{game.attempts ? `${game.attempts} intento(s) · mejor ${game.bestScore}/200` : 'Todavía no hay resultados evaluados.'}</small>{game.lastExplanation && <em>{game.lastExplanation}</em>}</div><button type="button" onClick={() => onNavigate(details.section)} disabled={Boolean(getOnlineParticipant()?.finishedAt)}>{game.status === 'not-started' ? 'Comenzar' : 'Abrir etapa'} <span aria-hidden="true">→</span></button></article>
+        const unlocked = isGameUnlocked(state, gameId)
+        const status = game.status === 'completed' ? 'Completada' : unlocked ? game.status === 'in-progress' ? 'Iniciada' : 'Disponible' : 'Bloqueada'
+        return <article key={gameId} className={`rescue-hub__stage rescue-hub__stage--${game.status}`}><div className="rescue-hub__stage-number">{GAME_IDS.indexOf(gameId) + 1}</div><div className="rescue-hub__stage-content"><span>{status}</span><h3>{details.title}</h3><p>{details.concept}</p><small>{game.attempts ? `Resultado del recorrido: ${game.bestScore}${gameId === 'escape-room' ? ' puntos' : '/100'}` : unlocked ? 'Todavía no hay un resultado evaluado.' : 'Completá la etapa anterior para continuar.'}</small>{game.lastExplanation && <em>{game.lastExplanation}</em>}</div><button type="button" onClick={() => onNavigate(details.section)} disabled={finalized || !unlocked}>{game.status === 'completed' ? 'Ver resultado' : 'Comenzar'} <span aria-hidden="true">→</span></button></article>
       })}</div>
-      {completed === 5 && <section className="rescue-hub__final" aria-labelledby="rescue-final-title"><span className="eyebrow">Misión completa</span><h3 id="rescue-final-title">Buen trabajo, {state.playerId}</h3><p>Integraste que un archivo se identifica por más que su nombre: sus tipos, formatos, estructuras, atributos y bytes determinan cómo puede interpretarse y operarse. También verificaste que los descriptores, los cursores, EOF y las transferencias deben observarse en el estado real del sistema.</p><div>{GAME_IDS.map((gameId) => <span key={gameId}>{GAME_DETAILS[gameId].title}: <strong>{state.games[gameId].bestScore}/200</strong></span>)}</div>{getOnlineParticipant() && !getOnlineParticipant()?.finishedAt && <button type="button" className="primary-action" onClick={finishOnlineParticipation} disabled={onlineBusy}>Finalizar participación</button>}{getOnlineParticipant()?.finishedAt && <strong>Participación finalizada</strong>}</section>}
-      {getOnlineParticipant() && <section className="rescue-ranking" aria-labelledby="rescue-ranking-title"><div><span className="eyebrow">Clasificación final</span><h3 id="rescue-ranking-title">Participantes finalizados</h3></div>{ranking.length ? <table><thead><tr><th>Posición</th><th>Apodo</th><th>Puntaje</th></tr></thead><tbody>{ranking.map((entry) => <tr key={`${entry.position}-${entry.nickname}`}><td>{entry.position}</td><td>{entry.nickname}</td><td>{entry.totalScore}/1.000</td></tr>)}</tbody></table> : <p>Aún no hay participantes finalizados.</p>}</section>}
-      <div className="rescue-hub__footer"><p><strong>Qué vas a integrar:</strong> distinguir la identidad de un archivo de sus bytes, observar metadatos y protección, usar descriptores y cursores, transferir datos correctamente y justificar cada decisión.</p><small>{getOnlineParticipant() ? 'Partida online: los cambios se guardan localmente y se sincronizan cuando hay conexión.' : 'Partida local de práctica.'}</small>{getOnlineParticipant() && <button type="button" className="filelab-secondary-button" onClick={leaveOnline}>Salir de partida online</button>}<button type="button" className="filelab-secondary-button" onClick={reset}>Reiniciar partida completa</button></div>
+      {completed === 5 && <section className="rescue-hub__final" aria-labelledby="rescue-final-title"><span className="eyebrow">Recorrido completo</span><h3 id="rescue-final-title">Buen trabajo, {state.playerId}</h3><div>{GAME_IDS.map((gameId) => <span key={gameId}>{GAME_DETAILS[gameId].title}: <strong>{state.games[gameId].bestScore}{gameId === 'escape-room' ? '' : '/100'}</strong></span>)}</div><p><strong>Primeros cuatro:</strong> {firstFourScore}/400 · <strong>Factory:</strong> {factoryScore} · <strong>Total:</strong> {score}</p>{state.bestRun && <p><strong>Mejor recorrido histórico:</strong> {state.bestRun.totalScore} puntos.</p>}<button type="button" className="primary-action" onClick={() => onNavigate('filelab-factory')}>Ver cierre del recorrido <span aria-hidden="true">→</span></button>{finalized && <strong>Participación finalizada</strong>}</section>}
+      {getOnlineParticipant() && <section className="rescue-ranking" aria-labelledby="rescue-ranking-title"><div><span className="eyebrow">Clasificación final</span><h3 id="rescue-ranking-title">Participantes finalizados</h3></div>{ranking.length ? <table><thead><tr><th>Posición</th><th>Apodo</th><th>Académicos</th><th>Factory</th><th>Total</th></tr></thead><tbody>{ranking.map((entry) => <tr key={`${entry.position}-${entry.nickname}`}><td>{entry.position}</td><td>{entry.nickname}</td><td>{entry.academicScore}/400</td><td>{entry.factoryScore}</td><td>{entry.totalScore}</td></tr>)}</tbody></table> : <p>Aún no hay participantes finalizados.</p>}</section>}
+      <div className="rescue-hub__footer"><p><strong>Qué vas a integrar:</strong> distinguir la identidad de un archivo de sus bytes, observar metadatos y protección, usar descriptores y cursores, transferir datos correctamente y justificar cada decisión.</p><small>{getOnlineParticipant() ? 'El recorrido actual y el mejor recorrido completo se sincronizan con la partida.' : 'El recorrido actual y el mejor recorrido completo se guardan en este dispositivo.'}</small>{getOnlineParticipant() && <button type="button" className="filelab-secondary-button" onClick={leaveOnline}>Salir de partida online</button>}</div>
     </div>
   )
 }
