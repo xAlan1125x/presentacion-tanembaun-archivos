@@ -29,6 +29,7 @@ export function FileLabOS() {
   const currentFolder = snapshot.folders.find((folder) => folder.id === snapshot.currentFolderId)!
 
   const refresh = useCallback(() => setRevision((value) => value + 1), [])
+  const closeDialog = useCallback(() => setDialog(null), [])
   const report = (message: string) => { setStatus(message); refresh() }
   const interfaceAction = (operation: string, message: string) => session.interfaceAction(operation, message)
 
@@ -158,9 +159,9 @@ export function FileLabOS() {
       <OperationConsole events={snapshot.events} processes={snapshot.engine.processes} buffer={snapshot.lastBuffer} onCommand={(command) => { interfaceAction('consola', `Ejecutar: ${command}`); const reply = session.executeConsole(command); report(reply.message); return reply }} onClear={() => { session.clearEvents(); refresh() }} />
       <div className={`filelab-status ${status.includes('falló') ? 'is-error' : ''}`} role="status" aria-live="polite"><span className="status-dot" aria-hidden="true" />{status}</div>
 
-      {dialog && <FileLabDialog title={dialog.type === 'create' ? 'Crear archivo' : dialog.type === 'rename' ? 'Renombrar archivo' : 'Eliminar archivo'} description={dialog.type === 'delete' ? `Esta acción eliminará “${selected?.name}” del escenario actual.` : 'La validación del nombre la realiza el motor de simulación.'} onClose={() => setDialog(null)}>
-        {dialog.type !== 'delete' && <label className="filelab-field">Nombre<input value={dialog.value} onChange={(event) => setDialog({ ...dialog, value: event.target.value })} onKeyDown={(event) => { if (event.key === 'Enter') submitDialog() }} /></label>}
-        <div className="filelab-dialog-actions"><button type="button" onClick={() => setDialog(null)}>Cancelar</button><button className={dialog.type === 'delete' ? 'filelab-danger-button' : 'filelab-primary-button'} type="button" onClick={submitDialog}>{dialog.type === 'create' ? 'Crear' : dialog.type === 'rename' ? 'Guardar nombre' : 'Eliminar'}</button></div>
+      {dialog && <FileLabDialog title={dialog.type === 'create' ? 'Crear archivo' : dialog.type === 'rename' ? 'Renombrar archivo' : 'Eliminar archivo'} description={dialog.type === 'delete' ? `Esta acción eliminará “${selected?.name}” del escenario actual.` : 'La validación del nombre la realiza el motor de simulación.'} onClose={closeDialog}>
+        {dialog.type !== 'delete' && <label className="filelab-field">Nombre<input value={dialog.value} onChange={(event) => setDialog((current) => current && current.type !== 'delete' ? { ...current, value: event.target.value } : current)} onKeyDown={(event) => { if (event.key === 'Enter') submitDialog() }} /></label>}
+        <div className="filelab-dialog-actions"><button type="button" onClick={closeDialog}>Cancelar</button><button className={dialog.type === 'delete' ? 'filelab-danger-button' : 'filelab-primary-button'} type="button" onClick={submitDialog}>{dialog.type === 'create' ? 'Crear' : dialog.type === 'rename' ? 'Guardar nombre' : 'Eliminar'}</button></div>
       </FileLabDialog>}
     </div>
   )

@@ -9,12 +9,16 @@ interface FileLabDialogProps {
 
 export function FileLabDialog({ title, description, children, onClose }: FileLabDialogProps) {
   const panelRef = useRef<HTMLDivElement>(null)
+  const onCloseRef = useRef(onClose)
+
+  useEffect(() => { onCloseRef.current = onClose }, [onClose])
+
   useEffect(() => {
     panelRef.current?.querySelector<HTMLElement>('input, textarea, button')?.focus()
-    const handleKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
+    const handleKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onCloseRef.current() }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
-  }, [onClose])
+  }, [])
 
   return (
     <div className="filelab-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>

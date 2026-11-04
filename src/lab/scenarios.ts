@@ -286,25 +286,6 @@ export const ACADEMIC_SCENARIOS: LabScenario[] = [
       ],
     },
   },
-  {
-    id: 'escape-room', title: 'Operación Rescate · Escape Room',
-    description: 'Misión integradora de nombres, atributos, acceso aleatorio, operaciones y verificación.',
-    defaultFolderId: 'rescue', primaryProcessId: 'rescuer',
-    folders: [{ id: 'root', name: 'FileLab' }, { id: 'rescue', name: 'Cámara de rescate', parentId: 'root' }],
-    fileLocations: { note: 'rescue', image: 'rescue', decoy: 'rescue', archive: 'rescue', recovery: 'rescue' },
-    engine: {
-      id: 'escape-room', title: 'Cámara de recuperación',
-      config: { clockStart: 1_736_812_800_000, clockStep: 1_000 },
-      processes: [{ id: 'rescuer', principalId: 'rescatista' }],
-      files: [
-        { id: 'note', name: 'instrucciones.txt', format: 'ascii', content: encoder.encode('No todo nombre revela el formato.'), attributes: { ownerId: 'rescatista', creatorId: 'rescatista', protection: protection() } },
-        { id: 'image', name: 'foto.dat', format: 'ascii', content: encoder.encode('PIXEL-0000'), attributes: { ownerId: 'rescatista', creatorId: 'rescatista', protection: protection() } },
-        { id: 'decoy', name: 'rescate.bin', format: 'binary', content: new Uint8Array([0x00, 0x11, 0x22, 0x33]), attributes: { ownerId: 'rescatista', creatorId: 'rescatista', protection: protection() } },
-        { id: 'archive', name: 'rescate-final.bin', format: 'binary', content: encoder.encode('HEADER|CLAVE-42|END'), attributes: { ownerId: 'rescatista', creatorId: 'rescatista', readOnly: true, protection: protection() } },
-        { id: 'recovery', name: 'recuperacion.txt', format: 'ascii', content: encoder.encode('pendiente'), attributes: { ownerId: 'rescatista', creatorId: 'rescatista', protection: protection() } },
-      ],
-    },
-  },
 ]
 
 export const LAB_SCENARIOS: LabScenario[] = [...PRACTICE_SCENARIOS, ...ACADEMIC_SCENARIOS]
