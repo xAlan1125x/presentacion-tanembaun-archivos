@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   CopyfileChallenge,
   createInitialState,
+  isGameUnlocked,
   recordEvaluation,
   saveCopyChallengeEvaluation,
 } from '..'
@@ -75,6 +76,7 @@ describe('CopyfileChallenge', () => {
     const state = saveCopyChallengeEvaluation(unlocked, evaluation, '2025-01-01T00:00:00.000Z')
     expect(state.games['copyfile-challenge'].bestScore).toBe(95)
     expect(state.games['copyfile-challenge'].attempts).toBe(1)
+    expect(isGameUnlocked(state, 'escape-room')).toBe(true)
   })
 
   it('restores an independent initial scenario', () => {

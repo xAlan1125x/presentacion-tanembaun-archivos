@@ -29,15 +29,20 @@ export function CopyfileChallengeGame() {
   }, [])
   if (phaseState.games['copyfile-challenge'].status === 'completed') {
     const result = phaseState.games['copyfile-challenge']
-    return <div className="copy-challenge-game"><section className="classification-result is-success"><div><span>Resultado definitivo del recorrido</span><strong>{result.bestScore} / 100</strong></div><p>{result.lastExplanation}</p><small>Esta etapa ya fue evaluada. Podrás repetirla al iniciar un recorrido completo nuevo.</small></section></div>
+    return <div className="copy-challenge-game"><section className="classification-result is-success"><div><span>Resultado definitivo del recorrido</span><strong>{result.bestScore} / 100</strong></div><p>{result.lastExplanation}</p><small>Esta etapa ya fue evaluada. Podrás repetirla al iniciar un recorrido completo nuevo.</small><button type="button" className="primary-action" onClick={() => document.getElementById('filelab-factory')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>Continuar a FileLab Factory <span aria-hidden="true">→</span></button></section></div>
   }
   const run = (action: (engine: CopyfileEngine) => CopyChallengeSnapshot) => setSnapshot(action(engineRef.current!))
   const submit = () => {
     const evaluation = engineRef.current!.evaluate()
-    setPhaseState(saveCopyChallengeEvaluation(phaseState, evaluation))
-    const saved = saveActiveGameState(saveCopyChallengeEvaluation(phaseState, evaluation))
+    const next = saveCopyChallengeEvaluation(phaseState, evaluation)
+    setPhaseState(next)
+    const saved = saveActiveGameState(next)
     notifyPhase5ProgressUpdated()
-    setMessage(saved && !saved.ok ? saved.error : `Resultado guardado: ${evaluation.score}/100.`)
+    setMessage(saved && !saved.ok
+      ? saved.error
+      : evaluation.completed
+        ? `Resultado definitivo guardado: ${evaluation.score}/100. FileLab Factory quedó habilitado.`
+        : `La etapa todavía no está completada (${evaluation.score}/100). ${evaluation.explanation}`)
     setSnapshot(engineRef.current!.snapshot())
   }
   const source = snapshot.lab.engine.files.find((file) => file.id === 'source')

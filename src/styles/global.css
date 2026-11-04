@@ -761,11 +761,11 @@ body { font-size: var(--type-secondary); line-height: 1.55; }
 .presentation-section input,
 .presentation-section textarea,
 .presentation-section select,
-.presentation-section button:not(.primary-action),
+.presentation-section button:not(.primary-action):not(.factory-station),
 .filelab-dialog input { border-color: var(--control-border); }
 .presentation-section button:hover:not(:disabled) { filter: brightness(.94); }
 .presentation-section button:active:not(:disabled) { transform: translateY(1px); }
-.presentation-section button:disabled,
+.presentation-section button:disabled:not(.factory-station),
 .escape-room-files button:disabled,
 .escape-room-tool-buttons button:disabled,
 .escape-room-hints button:disabled {
