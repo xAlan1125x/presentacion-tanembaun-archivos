@@ -165,6 +165,7 @@ export function OperationsDemo() {
 
 const copyCode = [
   { text: '/* Programa para copiar archivos. La verificación y el reporte de errores son mínimos. */' },
+  { text: 'copyfile abc xyz    /* comando de terminal: copia abc en xyz */' },
   { text: '#include <sys/types.h>' },
   { text: '#include <fcntl.h>' },
   { text: '#include <stdlib.h>' },
